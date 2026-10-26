@@ -341,7 +341,9 @@ async fn health(sh: &Arc<Shared>) -> Response<BoxBody> {
         .is_ok_and(|r| r.status().is_success());
     Response::builder()
         .header("content-type", "application/json")
-        .body(boxed(&json!({"ok": true, "upstream": upstream})))
+        .body(boxed(
+            &json!({"ok": true, "upstream": upstream, "pid": std::process::id()}),
+        ))
         .unwrap()
 }
 

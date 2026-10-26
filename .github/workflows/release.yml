@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: aarch64-unknown-linux-musl
+      - name: install build tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools cmake clang
+      - name: tag version check
+        id: ver
+        run: |
+          ver=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE:-}" = tag ]; then
+            tag=${GITHUB_REF_NAME#v}
+            [ "$tag" = "$ver" ] || { echo "tag $tag != Cargo.toml version $ver"; exit 1; }
+          fi
+      - run: cargo build --release --locked --target aarch64-unknown-linux-musl
+      - name: check static and runs
+        run: |
+          file target/aarch64-unknown-linux-musl/release/shrug | tee /dev/stderr | grep -q "statically linked"
+          target/aarch64-unknown-linux-musl/release/shrug --version
+      - name: package
+        run: |
+          mkdir -p dist/shrug-pkg
+          cp target/aarch64-unknown-linux-musl/release/shrug LICENSE README.md install.sh dist/shrug-pkg/
+          tar -C dist/shrug-pkg -czf dist/shrug-aarch64-unknown-linux-musl.tar.gz shrug LICENSE README.md
+          cp install.sh dist/
+          (cd dist && sha256sum shrug-aarch64-unknown-linux-musl.tar.gz install.sh > SHA256SUMS)
+      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: shrug-dist
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: shrug-dist
+      - name: release notes
+        run: |
+          serial=$(grep -o '"serial": [0-9]*' catalog/catalog.json | head -1 | awk '{print $2}')
+          {
+            echo "Shrug $GITHUB_REF_NAME — one binary that installs and runs Atlas on DGX Sparks."
+            echo
+            echo "Static aarch64 musl binary. Install:"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://github.com/Enntity/shrug/releases/download/$GITHUB_REF_NAME/install.sh | sh"
+            echo '```'
+            echo
+            echo "Catalog serial: $serial"
+            echo
+            echo "Releases:"
+            grep -o '"id": "[^"]*"' catalog/releases.json | cut -d'"' -f4 | sed 's/^/- /'
+          } > notes.md
+      - name: create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "Shrug ${GITHUB_REF_NAME#v}" --notes-file notes.md --latest shrug-aarch64-unknown-linux-musl.tar.gz SHA256SUMS install.sh

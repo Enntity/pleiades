@@ -5,7 +5,11 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 #[derive(Parser)]
-#[command(version, about)]
+#[command(
+    version,
+    about,
+    long_version = concat!(env!("CARGO_PKG_VERSION"), " (catalog serial ", env!("SHRUG_CATALOG_SERIAL"), ")")
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,

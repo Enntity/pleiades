@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: catalog
+
+on:
+  push:
+    branches: [main]
+    paths: ["catalog/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: catalog-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - run: cargo build
+      - run: cargo run -q -- catalog build --check
+      - name: compare with published catalog
+        id: pub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          url=https://github.com/Enntity/shrug/releases/download/catalog/catalog.json
+          if gh release download catalog -p catalog.json --dir /tmp/pub --clobber 2>/dev/null || curl -fsSL "$url" -o /tmp/pub-catalog.json; then
+            cur=/tmp/pub/catalog.json; [ -f "$cur" ] || cur=/tmp/pub-catalog.json
+            if cmp -s "$cur" catalog/catalog.json; then
+              echo "result=identical" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            theirs=$(grep -o '"serial": [0-9]*' "$cur" | head -1 | awk '{print $2}')
+            ours=$(grep -o '"serial": [0-9]*' catalog/catalog.json | head -1 | awk '{print $2}')
+            if [ "${theirs:-0}" -ge "${ours:-0}" ]; then
+              echo "published serial $theirs >= ours $ours; serials must increase"; exit 1
+            fi
+          fi
+          echo "result=publish" >> "$GITHUB_OUTPUT"
+      - if: steps.pub.outputs.result == 'publish'
+        name: sign, verify, upload
+        env:
+          SHRUG_CATALOG_KEY: ${{ secrets.SHRUG_CATALOG_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./target/debug/shrug catalog sign --key-env SHRUG_CATALOG_KEY
+          ./target/debug/shrug catalog verify catalog/catalog.json catalog/catalog.json.sig
+          gh release view catalog >/dev/null 2>&1 || \
+            gh release create catalog --prerelease --title "Shrug catalog" --notes "Signed Shrug catalog, published by CI."
+          gh release upload catalog catalog/catalog.json catalog/catalog.json.sig --clobber

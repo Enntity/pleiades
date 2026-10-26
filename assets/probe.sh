@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
+# shellcheck shell=bash
 # Shrug probe: read-only facts about one host. Output is parsed by src/probe.rs:
 # "## name" section headers, then "key=value" lines or positional lines.
 set -u

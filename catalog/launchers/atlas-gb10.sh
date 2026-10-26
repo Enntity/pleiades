@@ -4,7 +4,7 @@
 # arguments from the catalog release and pipes this script to bash -s.
 set -euo pipefail
 
-image= model_root= checkpoint= cuda_cache= name=
+image='' model_root='' checkpoint='' cuda_cache='' name=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --image) image=$2; shift 2 ;;

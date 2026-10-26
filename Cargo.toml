@@ -13,6 +13,12 @@ anyhow = "1.0.104"
 base64 = "0.23.1"
 clap = { version = "4.6.7", features = ["derive"] }
 ed25519-dalek = "3.0.0"
+getrandom = "0.4.3"
+tokio-stream = "0.1"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["http1", "server"] }
+hyper-util = { version = "0.1.21", features = ["tokio", "client-legacy"] }
+tokio = { version = "=1.53.3", features = ["rt-multi-thread", "net", "macros", "time", "io-util"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }

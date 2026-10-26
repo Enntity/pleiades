@@ -48,6 +48,12 @@ enum Cmd {
         /// Actually install, start and verify.
         #[arg(long)]
         go: bool,
+        /// Force a full relaunch even if the release is already running.
+        #[arg(long)]
+        restart: bool,
+        /// Gateway listen address stored in config.json (default 127.0.0.1:8145).
+        #[arg(long)]
+        listen: Option<String>,
     },
     /// List catalog releases and whether each fits this cluster.
     Models,
@@ -74,6 +80,24 @@ enum Cmd {
         #[arg(long)]
         go: bool,
     },
+    /// Quick benchmark next to the release's published numbers.
+    Bench {
+        #[arg(long, default_value_t = 2)]
+        reps: usize,
+    },
+    /// Client config for claude-code, codex, opencode or env.
+    Connect {
+        client: String,
+        /// Use the rank-0 LAN address and API key instead of loopback.
+        #[arg(long)]
+        remote: bool,
+        /// Write the config instead of printing it.
+        #[arg(long)]
+        go: bool,
+    },
+    /// The HTTP gateway; started detached by `up`. Not for users.
+    #[command(hide = true)]
+    Serve,
     /// Catalog development commands.
     #[command(hide = true)]
     Catalog {
@@ -126,12 +150,19 @@ fn run() -> anyhow::Result<i32> {
     let cwd = std::env::current_dir()?;
     match &cli.command {
         None | Some(Cmd::Plan) => cmd::cluster::plan_cmd(&g),
-        Some(Cmd::Up { go }) => cmd::cluster::up(&g, *go),
+        Some(Cmd::Up {
+            go,
+            restart,
+            listen,
+        }) => cmd::cluster::up(&g, *go, *restart, listen.as_deref()),
         Some(Cmd::Models) => cmd::inspect::models(&g),
         Some(Cmd::Status) => cmd::inspect::status(&g),
         Some(Cmd::Logs { rank, follow }) => cmd::inspect::logs(&g, *rank, *follow),
         Some(Cmd::Down) => cmd::cluster::down(&g),
         Some(Cmd::Rollback { go }) => cmd::cluster::rollback(&g, *go),
+        Some(Cmd::Serve) => shrug::serve::run().map(|_| 0),
+        Some(Cmd::Bench { reps }) => shrug::bench::run(*reps),
+        Some(Cmd::Connect { client, remote, go }) => shrug::connect::run(client, *remote, *go),
         Some(Cmd::ClockCap { go }) => cmd::cluster::clock_cap(&g, *go),
         Some(Cmd::Catalog { cmd }) => match cmd {
             CatalogCmd::Build { check } => cmd::catalog_dev::build(&cwd, *check),

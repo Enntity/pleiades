@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+pub mod bench;
 pub mod catalog;
 pub mod cmd;
+pub mod connect;
 pub mod discover;
 pub mod executor;
 pub mod gateway;
@@ -9,6 +11,7 @@ pub mod keys;
 pub mod plan;
 pub mod probe;
 pub mod render;
+pub mod serve;
 pub mod state;
 pub mod topo;
 pub mod verify;

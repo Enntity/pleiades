@@ -55,6 +55,17 @@ pub struct Release {
     pub receipts: Vec<String>,
     #[serde(default)]
     pub notes: String,
+    #[serde(default)]
+    pub bench_reference: Option<BenchRef>,
+}
+
+/// Optional published quick-bench numbers, tok/s per workload.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BenchRef {
+    pub harness: String,
+    pub prose: f64,
+    pub code: f64,
+    pub structured: f64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

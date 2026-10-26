@@ -1,0 +1,33 @@
+## shrug.probe/v1
+## host
+hostname=spark-c
+machine_id=cccc3333
+arch=aarch64
+user=spark
+home=/home/spark
+## gpu
+NVIDIA GB10, 580.178.04
+## mem
+memtotal=127598836
+memavailable=60000000
+## fabric
+roceP2p1s0f0 enP2p1s0f0np0 state=ACTIVE addrs=10.0.15.2/24
+roceP2p1s0f1 enP2p1s0f1np1 state=ACTIVE addrs=10.0.17.1/24
+rocep1s0f0 enp1s0f0np0 state=ACTIVE addrs=10.0.14.2/24
+rocep1s0f1 enp1s0f1np1 state=ACTIVE addrs=10.0.16.1/24
+## lan
+lan_dev=eth0
+lan_ip=192.0.2.13
+## docker
+docker_server=29.6.2
+docker_ok=1
+runtimes=io.containerd.runc.v2,runc
+nvidia_ctk=1
+## containers
+## gpu-procs
+## clockcap
+active
+## disk
+home_free_kib=900000000
+## tools
+tools=rsync,curl,ping,hf

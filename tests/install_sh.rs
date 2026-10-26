@@ -11,7 +11,7 @@ fn mirror() -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     // A fake "shrug" that just prints a version line.
     let fake = dir.join("fake-shrug");
-    std::fs::write(&fake, "#!/bin/sh\necho shrug 0.1.0 (catalog serial 1)\n").unwrap();
+    std::fs::write(&fake, "#!/bin/sh\necho 'shrug 0.1.0 (catalog serial 1)'\n").unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

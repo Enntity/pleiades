@@ -171,7 +171,7 @@ impl Up<'_> {
                     if rp.rank != 0 && cabled.contains(&rp.rank) {
                         continue;
                     }
-                    let dir = format!("{}/{}", rp.model_root, &dir_name);
+                    let dir = format!("{}/{}", rp.model_root, dir_name);
                     jobs.push(s.spawn(move || {
                         let host = self.hosts[rp.host_idx];
                         if self.marker(host, &dir, &w.revision) {
@@ -203,7 +203,7 @@ impl Up<'_> {
                 let mut copies = Vec::new();
                 for &ri in &cabled {
                     let rp = &ranks[ri];
-                    let dir = format!("{}/{}", rp.model_root, &dir_name);
+                    let dir = format!("{}/{}", rp.model_root, dir_name);
                     let dir_name = dir_name.clone();
                     copies.push(s.spawn(move || {
                         let host = self.hosts[rp.host_idx];

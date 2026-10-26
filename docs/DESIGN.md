@@ -7,257 +7,170 @@ start it, prove it works, connect the agent, and report how it is running.
 
 ## Product rules
 
-1. **Install and use.** One installer, one binary, one command to get from a
-   bare Spark to a working endpoint. Anything that needs a manual step is a
-   bug in Shrug or in its documentation.
-2. **The best model for each cluster size, and few others.** Each cluster size
-   gets one default model for agent work. A second model is added only when
-   it wins a job the default loses (much lower latency, for example), and the
-   measurement shows it. A new model replaces the old one when it wins on the
-   same hardware with the same benchmarks; we don't keep both.
-3. **Speed counts only with quality.** A release is listed only after it
-   passes the quality and tool-calling checks of its source repository, on the
-   cluster size it is listed for. Throughput comes after that.
-4. **Agents are first-class users.** `--json` on every command, stable exit
-   codes, plans that change nothing until `--go`, and errors that say what
-   to run next.
-5. **Narrow scope.** DGX Spark and Atlas in v1. No other engines, no media
-   models, no cloud providers, no community host. [LLooM](https://github.com/Enntity/lloom)
-   already covers all of that.
+1. **Install and use.** One installer, one binary, one command from a bare
+   Spark to a working endpoint. A step that needs the user is a bug, unless
+   it is sudo or a license decision.
+2. **The best model for each cluster size, and few others.** Each size has a
+   default for agent work and at most one alternative that wins a job the
+   default loses. A new model replaces the old one when it wins on the same
+   hardware with the same benchmarks.
+3. **Speed counts only with quality.** A release is listed only after its
+   source qualified it for tool calling and quality on that cluster size.
+4. **Agents are first-class users.** `--json` everywhere, stable exit codes
+   (0 ok, 1 error, 2 usage, 3 blockers), plans that change nothing until
+   `--go`, and blockers that name the command that fixes them.
+5. **Narrow scope.** DGX Spark and Atlas. No other engines, media models,
+   cloud providers or community host; [LLooM](https://github.com/Enntity/lloom)
+   covers those.
 
-## Cluster sizes
+## Releases
 
-GB10 has 128 GB of unified memory per Spark, of which the engine sees about
-120 GB. Sparks join over direct ConnectX-7 cables, so a cluster is 1, 2 or 4
-machines. Three Sparks run the two-Spark release on two of them.
+GB10 has 128 GB of unified memory per Spark. Sparks join over direct
+ConnectX-7 cables, so a cluster is 1, 2 or 4 machines; three Sparks run the
+two-Spark release on two of them.
 
-### One Spark
+| Sparks | Default | Alternative | Qualified by |
+|---|---|---|---|
+| 1 | Qwen3.8-27B NVFP4, 128K, MTP | Qwen3.8-Flash-Next NVFP4, 32K, n-gram table on NVMe | Atlas-Inf recipes |
+| 2 | GLM-5.3-Flash FP4-Local, SparkGLM 0.1.0 Spark mode, 1M × 4 | Qwen3.8-Flash-Next FP4-Local, SparkQwen 0.3.1 Spark mode, 256K × 8 | Enntity |
+| 4 | GLM-5.3-Flash, SparkGLM 0.1.0 TP4, ring when the 3–0 cable exists | | Enntity |
 
-No release is chosen. Atlas-Inf publishes single-GB10 numbers for several
-candidates, but those come from short prompts with `max_tokens <= 30` and are
-not Enntity measurements:
+The single-Spark releases follow Atlas-Inf's `qwen3.8-27b-nvfp4-agentic` and
+`qwen3.8-flash-next-nvfp4` recipes on their `atlas-gb10` image. The 27B
+release departs from its recipe's gate settings in one way: 131072 context
+with FP8 KV instead of 32K with BF16, which the recipe itself recommends for
+agentic coding. Quality above about 24K is uncharacterized on those weights.
+Flash-Next on one Spark is the bigger model but prefills at roughly 750 tok/s
+and holds 32K, so it is the alternative, not the default.
 
-| Candidate | Upstream decode (tok/s) | Notes |
-|---|---:|---|
-| Qwen3.8-27B NVFP4 | 23.59 | Atlas-Inf's flagship; dense; MTP |
-| Qwen3.5-35B-A3B NVFP4 | 131 | MTP K=2; 3B active |
-| Qwen3.8-Flash-Next NVFP4 | 36.7 | ~180B MoE; streams a 47.7 GB table from NVMe |
-| Nemotron-3.5-Lightning 30B-A3B + DSpark | "sub-10ms/token" | drafter-dependent |
+GLM and Qwen on two Sparks were measured with different harnesses, so neither
+release's numbers say which is better for agents. GLM is the default for its
+1M context and tool-calling record; a shared qualification on one pair would
+settle it.
 
-Before this size ships, we need a one-Spark qualification in the style of
-SparkQwen's: tool calling with streaming `tool_calls`, a long-context needle,
-arithmetic, decode and prefill, all on our hardware with receipts. This is
-probably the size with the most users, and it is the size we know least about.
-
-### Two Sparks
-
-Both engines have receipts on our pair, but from different benchmarks, so we
-can't yet say which one is better:
-
-| | SparkQwen RC16 | SparkGLM unified, TP2 |
-|---|---|---|
-| Model | Qwen3.8-Flash-Next NVFP4 | GLM-5.3-Flash FP4-Local |
-| Context per request | 256K (`4x262k`) | 1M (`4x1m`) |
-| Decode, one stream | sparkDash structured / prose / code: 102.0 / 72.7 / 93.8 | RigMark-derived structured / prose / code, Spark mode, median of 2: 89.8 / 37.5 / 67.2 |
-| Tool calling | `tool_probe.py` 35/35 | ToolEvalBench 91.0 (FP4-Local release image) |
-
-The default is decided by one shared qualification run on the same pair:
-the same tool-calling suite, needle, quality probe and decode/prefill
-workloads, run against both releases. Until that run exists, Shrug asks the
-user to choose and shows both rows.
-
-### Four Sparks
-
-SparkGLM unified TP4. Medians of two runs, Spark mode: prose / code /
-structured 57.1 / 104.1 / 137.9 tok/s on a chain and 58.3 / 106.4 / 141.4 on
-a ring. Ring needs the closing rank 3 to rank 0 link; Shrug detects it and
-otherwise uses the chain.
-
-### Weight licenses
-
-SparkGLM's Spark mode uses the `incoai/GLM-5.3-Flash-DFlash2` drafter, which
-is CC BY-NC-ND 4.0 (non-commercial). Strict mode doesn't need it. Each
-release in the catalog lists the licenses of the weights it downloads.
-Shrug prints them in the plan and won't download a non-commercial weight
-unless the user explicitly accepts it.
+SparkGLM's launcher mounts the `incoai/GLM-5.3-Flash-DFlash2` drafter in every
+mode, and that drafter is CC BY-NC-ND 4.0. Shrug shows every weight license in
+the plan and requires acceptance of a non-commercial one (a prompt during
+`up --go`, or `--accept-noncommercial`), remembered per weight and revision.
 
 ## Architecture
 
-One static `aarch64-unknown-linux-musl` binary, `shrug`, installed on the
-Spark that serves the API (rank 0). It reaches the other ranks over `ssh`.
+One static `aarch64-unknown-linux-musl` binary. It runs on the Spark that
+serves the API (rank 0) and reaches the others over ssh.
 
 ```
-shrug               probe + plan (read-only, the default)
-shrug up --go       install or upgrade, start, verify, connect
-shrug rollback      return to the previous release
-shrug status        model, pins, KV pool, per-rank memory, links, recent throughput
-shrug bench         quick benchmark beside the published receipts
-shrug connect X     client config for claude-code, codex, opencode, omp
-shrug down          stop every rank
-shrug serve         the gateway (run as a systemd service by `up`)
+shrug               probe, discover, plan; changes nothing
+shrug up --go       install or upgrade, start, verify, start the gateway
+shrug rollback --go previous release
+shrug status        release, pins, ranks, memory, clocks, gateway, recent requests
+shrug bench         three streamed workloads, receipt under ~/.shrug/bench
+shrug connect X     claude-code, codex, opencode, env
+shrug logs | down | models | clock-cap --go
+shrug serve         the gateway (started detached by `up`)
 ```
 
-### Probe
+### Probe and discovery
 
-Read-only facts about this machine and its peers: GB10 present
-(`nvidia-smi`), memory, disk free on the model root, Docker with the NVIDIA
-runtime configured, `gpu-clock-cap.service` state, ConnectX-7 netdevs with
-their RoCE IPv4 addresses, and the peer on each cable. Peers are found from
-the cable addresses and confirmed over `ssh`. The result is one JSON
-document; every later step reads it and none of them probes again.
+A read-only shell probe on each host reports the GPU, memory, RDMA devices
+with their IPv4 addresses, the LAN route, Docker and the NVIDIA toolkit, the
+running containers and which of them hold a GPU, GPU processes mapped to
+their containers, the clock-cap service, free disk and a few tools.
+
+Peers are found from rank 0's cable addresses (the complement host on /30 and
+/31, the other of .1/.2 on /24), probed over ssh, and the search continues
+through each new peer by ProxyCommand chains that carry the same options and
+identity files on every hop. `--hosts` skips discovery. Shrug keeps its own
+known_hosts file and never edits `~/.ssh/known_hosts`. A host that answers
+ping but refuses ssh becomes a blocker naming the `ssh-copy-id` to run.
+
+Two ports are cabled when their IPv4 networks match. From the graph: one host
+is single, two a pair, four of degree two a ring, four in a line a chain.
+Rank 0 is the local machine; a chain must be run from an end. A pair uses its
+lowest-subnet rail. On four Sparks each edge uses every rail, in subnet order,
+and the leader address is the first of rank 0's addresses that every rank can
+reach. On our cluster this reproduces the hand-written LLooM configuration.
+
+Blockers apply to the hosts the release uses: no GB10, Docker unusable, no
+NVIDIA toolkit, no clock cap, a GPU held by anything not named `shrug-*`, not
+enough disk, an unaccepted non-commercial weight, too few Sparks. Problems on
+unused hosts are warnings.
 
 ### Catalog
 
-The catalog lists the releases Shrug can install. Engine releases arrive every
-few days, much faster than Shrug itself changes, so the catalog is versioned
-and published separately from the binary:
+`catalog/releases.json` lists the releases. Each records the model and
+drafter by Hugging Face repo and revision with sizes and licenses, the engine
+image by digest and its Atlas commit, the launcher, per-rank argument
+templates, the client-visible model ID, context, concurrency, receipts and
+who qualified it. `shrug catalog build` inlines each launcher's text and
+SHA-256 into `catalog/catalog.json`, which the binary embeds.
 
-- Entries are TOML files under `catalog/`, changed through reviewed pull
-  requests. Release CI signs each catalog version with Ed25519 and attaches it
-  to a GitHub release.
-- The binary pins the public keys (two, so one can be rotated out) and rejects
-  any catalog not signed by one of them. HTTPS from GitHub is not the trust
-  root: a key fetched from the same host is not independent of it.
-- The binary also embeds the catalog that was current when it was built, so
-  a fresh install works offline and a failed fetch falls back to it.
-- An entry can declare the oldest Shrug that understands it. An older binary
-  lists that entry as needing an upgrade instead of trying to run it.
-- A newer catalog only changes the plan. `shrug` reports that a newer release
-  is available; `shrug up --go` drains requests, stops every rank, starts and
-  verifies the new release, and keeps the previous one for `shrug rollback`.
+The launchers are SparkGLM's and SparkQwen's own `install/start-node.sh` at
+the qualified commits, byte for byte, plus Shrug's `atlas-gb10.sh` for the
+single-Spark image. Shrug pipes the release's launcher to `bash -s` on each
+rank with the rendered arguments, so a release runs with the flags its
+receipts were measured with. Format: [CATALOG.md](CATALOG.md).
 
-Each release records:
+Engine releases ship faster than Shrug, so the catalog updates on its own.
+Release CI signs each published catalog with Ed25519 and uploads it to the
+`catalog` prerelease. The binary pins two public keys (CI and an offline
+backup), accepts only a signed catalog whose serial is not older than the
+embedded or cached one, and falls back to the embedded copy. A new catalog
+changes only the plan.
 
-- id, cluster size, topology (chain or ring), role (`agent` or `fast`)
-- model: Hugging Face repo, immutable revision, size on disk, license
-- extra weights (drafter): repo, revision, license
-- engine: image reference by manifest digest, Atlas commit, source repo and tree
-- profile and mode passed to the engine
-- the client-visible model ID and context limit
-- links to the receipts it was qualified with, plus the quick-bench numbers
-  `shrug bench` compares against
+### Install, start, verify
 
-LLooM's `backends/atlas-sparkglm/pins.json` and `backends/atlas-sparkqwen/pins.json`
-already carry most of this and are the starting point.
+1. Pull the image by digest on every rank (falling back to `docker save |
+   ssh docker load` from rank 0), check it is arm64, and run `nvidia-smi -L`
+   inside it.
+2. Download weights with `hf`, or a pinned `python:3.12-slim` container with
+   a pinned `huggingface_hub`, on rank 0 and on every rank not cabled to it,
+   in parallel. Copy to cabled ranks over the cable with eight rsync streams.
+   A `.shrug-revision` marker is written last on each host.
+3. Remove Shrug's previous containers, start ranks from the highest to rank 0,
+   and wait up to 20 minutes for `/health`, watching every container.
+4. Start the gateway, then verify through it: `17*23` answered `391` with a
+   normal stop, a streamed reply, a streamed `get_weather` tool call with JSON
+   arguments, and an Anthropic `/v1/messages` reply. Only then is it ready.
 
-### Engines
-
-Shrug runs Atlas in Docker. DGX OS ships Docker and the NVIDIA Container
-Toolkit, so there is nothing to install, though some Sparks still need the
-NVIDIA runtime configured; `shrug` checks for that. Docker keeps each engine's
-CUDA and NCCL versions independent of the host's, and an image digest is the
-identity every receipt refers to.
-
-Docker already stores the heavy part once. In the two images LLooM pins today
-(2.18 GB and 2.02 GB compressed), about 1.70 GB is the same CUDA runtime base.
-Each image adds about 480 MB and 320 MB of its own, mostly the layer from its
-runtime package install. The Atlas binary itself is about 25 MB compressed.
-
-What costs more is one image per model. SparkGLM and SparkQwen each build
-Atlas for one model (`ATLAS_TARGET_MODEL=glm-5.3-flash` or
-`qwen3.8-flash-next`). Atlas-Inf builds `ATLAS_TARGET_MODEL='*'` into one
-multi-model `atlas-gb10` image instead. The target is the same for Shrug: one
-multi-model image per engine release, built from Enntity/atlas `spark-shared`,
-which already integrates the GLM and Qwen work. Models then become catalog
-data (weights, profile and mode), and upgrading the engine is one pull per
-Spark. SparkGLM and SparkQwen stay the qualification and release lines for
-their models and publish into that image.
-
-Two things have to happen first. SparkQwen `main` already pins `spark-shared`;
-SparkGLM `main` still pins its own `sparkglm` branch and has to move. And a
-build with every model compiled in is not the binary either repository
-qualified, so both models need receipts on it. Until then, catalog entries
-point at the per-model images.
-
-Weights live in one store per Spark, laid out by Hugging Face repo and
-revision, mounted read-only into whichever engine runs, and copied to the
-other ranks once over the cable. Removing a release keeps its weights unless
-the user asks to delete them.
-
-A native bundle (binary and libraries, no Docker) would bring back the
-dependence on the host's CUDA and NCCL, add a `sudo apt` step, and lose the
-digest identity. We'll revisit it for Strix Halo, where Atlas already runs
-natively.
-
-### Install and start
-
-Ported from SparkGLM's and SparkQwen's `start.sh` and `install/`, which already
-work. Pull the image by digest on each rank and check its labels. Download
-the weights once on rank 0 and copy them over the cable. Check the clock cap
-and free memory on every rank. Start the workers first, then rank 0, and
-wait for health. The steps are idempotent, so a rerun skips finished work.
-
-Before starting anything, Shrug refuses to proceed if any rank is already
-running an Atlas, LLooM or other GPU workload. It never stops a process it
-didn't start.
-
-### Verify
-
-`up` reports ready only after a real chat completion, a streamed response,
-and a streamed tool call with well-formed `tool_calls` deltas all succeed
-through the Shrug gateway. Health checks alone don't count.
+`up --go` on a healthy cluster already running the chosen release does
+nothing; `--restart` relaunches.
 
 ### Gateway
 
-A thin authenticated proxy on `127.0.0.1:8145` in front of Atlas on rank 0's
-loopback. Atlas already serves `/v1/chat/completions`, `/v1/responses` and
-`/v1/messages`, so Shrug passes requests through without translating them.
-It adds:
+`shrug serve` listens on `127.0.0.1:8145` by default and proxies
+`/v1/chat/completions`, `/v1/completions`, `/v1/responses`, `/v1/messages` and
+`/v1/messages/count_tokens` to the engine on `127.0.0.1:8893`. It rewrites
+the request's model to the release's, streams responses frame by frame with
+no timeouts, drops the upstream request when the client disconnects, and
+records first-byte time and token usage for `status`. On a non-loopback
+listen it generates an API key and requires it from non-loopback peers.
 
-- API keys, required on any non-loopback bind
-- `/v1/models` with the release's exact model ID and a `default` alias
-- per-request metrics (time to first token, output rate, tokens) for `status`
-- cancellation sent through to Atlas, and no idle timeout on long prefills
-  (LLooM hit a five-minute transport deadline on cold 1M-token prompts)
+Engines don't restart themselves after a reboot; `shrug up --go` brings the
+cluster back, skipping finished steps.
 
-A cluster runs one release at a time, because each engine takes most of
-unified memory; packaging doesn't change that. Switching drains requests,
-stops every rank, and starts the new release. That removes the admission
-planner, eviction and co-residency logic that make up a large part of LLooM.
+### Docker
 
-### Status and bench
+DGX OS ships Docker and the NVIDIA container toolkit, and receipts name image
+digests, so engines run as containers. The two Enntity images share their
+1.7 GB CUDA base layer. The longer-term target is one multi-model Atlas image
+per engine release, built from Enntity/atlas `spark-shared`, which SparkQwen
+already pins; SparkGLM has to move to it and both models need receipts on
+the combined build first.
 
-`status` is the place to see how the cluster is running: release and pins, KV
-pool size, free memory and GPU clock per rank, link state, and throughput from
-recent requests. `bench` runs the release's quick workloads through the
-gateway and prints your numbers next to the published ones, from the same
-harness and settings, so a slow cable or missing clock cap shows up as a gap.
+## What is verified
 
-## What comes from where
-
-| Source | Taken | Left behind |
-|---|---|---|
-| LLooM | GB10 and cluster detection (`machine-profile.mjs`, `cluster.mjs`), Atlas pin manifests and checks, client configs (`client-integrations.mjs`), `doctor` checks, dry-run / `--go` conventions, security defaults | vLLM, SGLang, MLX, llama.cpp, Ollama and media backends; community host and recipe packs; admission and eviction; head promotion, standby, reservations; external providers; Node |
-| SparkGLM, SparkQwen | rank start order, clock-cap check, weight copy over the cable, profiles, quick-bench workloads and receipts | per-model shell entry points (Shrug becomes the entry point; the repos stay the engine releases) |
-| Enntity/atlas | the engine, through the images those repos publish | nothing is vendored here |
-
-Shrug doesn't build Atlas. It runs the images SparkGLM and SparkQwen publish
-and qualify.
-
-## Milestones
-
-1. **Skeleton.** Repository, design, Rust workspace, CI.
-2. **Probe and plan.** `shrug` on a real pair and a real quad prints the
-   correct cluster, links, release and plan, with `--json`. Changes nothing.
-3. **Two Sparks end to end.** `up --go` from bare Sparks to verified
-   endpoint for both two-Spark releases. `down`, rerun and resume.
-4. **Status, bench, connect.**
-5. **Four Sparks.** TP4 chain and ring.
-6. **One Spark.** After its qualification picks a release.
-7. **Distribution.** Static release binaries, `install.sh` with checksum
-   verification, signed catalogs, upgrade and rollback.
-
-In parallel, outside this repository: SparkGLM onto `spark-shared` and a
-qualified multi-model image. Strix Halo follows, as a second hardware family
-in the catalog.
+- Unit and integration tests cover probe parsing, topology for every shape,
+  argument rendering for every release, launch order, skip logic, the
+  verification parsers, catalog signing, the gateway against a fake engine,
+  the client configs, the bench parser and the installer.
+- Read-only runs on our four Sparks found the ring, matched LLooM's per-rank
+  devices and blocked on the production workloads running there.
+- End-to-end `up --go` runs on real Sparks are tracked in the release notes.
 
 ## Open questions
 
-- **Upstream alignment.** Whether our multi-Spark engine work publishes into
-  the same multi-model image line as Atlas-Inf's `atlas-gb10`, how
-  single-Spark releases qualified upstream enter the catalog, and how Shrug
-  relates to `sparkrun`.
-- **Two-Spark default.** Decided by the shared qualification above.
-- **One-Spark release.** Needs its own qualification.
-- **Running from a laptop.** A macOS build that drives the Sparks over `ssh`
-  would let an agent on the developer's machine manage the cluster. Not in v1.
+- **Upstream alignment.** Whether the multi-Spark engine work publishes into
+  Atlas-Inf's `atlas-gb10` image line, how upstream-qualified releases enter
+  the catalog, and how Shrug relates to `sparkrun`.
+- **Two-Spark default.** A shared qualification of both releases on one pair.
+- **Strix Halo.** The next hardware family; Atlas already runs there natively.

@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 [package]
-name = "pleiades"
+name = "shrug"
 version = "0.0.0"
 edition = "2024"
 license = "AGPL-3.0-only"
-repository = "https://github.com/Enntity/pleiades"
+repository = "https://github.com/Enntity/shrug"
 description = "Install and run the Atlas inference engine on DGX Sparks"
 publish = false
 

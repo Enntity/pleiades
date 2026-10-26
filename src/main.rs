@@ -8,7 +8,7 @@ struct Cli {}
 fn main() {
     let _cli = Cli::parse();
     println!(
-        "pleiades {}: pre-alpha, no commands are implemented yet. See docs/DESIGN.md.",
+        "¯\\_(ツ)_/¯ shrug {}: pre-alpha, no commands are implemented yet. See docs/DESIGN.md.",
         env!("CARGO_PKG_VERSION")
     );
 }

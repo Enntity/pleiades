@@ -1,0 +1,342 @@
+{
+  "schema": "shrug.catalog/v1",
+  "serial": 1,
+  "defaults": {
+    "1": "qwen3.8-27b-1x",
+    "2": "glm-5.3-flash-2x",
+    "3": "glm-5.3-flash-2x",
+    "4": "glm-5.3-flash-4x"
+  },
+  "releases": [
+    {
+      "id": "qwen3.8-27b-1x",
+      "name": "Qwen3.8-27B on one Spark",
+      "summary": "Dense 27B hybrid with native MTP, 128K context, one request at a time.",
+      "model_id": "qwen3.8-27b-atlas",
+      "sparks": 1,
+      "topologies": ["single"],
+      "role": "agent",
+      "context_tokens": 131072,
+      "concurrency": 1,
+      "qualified_by": "Atlas-Inf",
+      "source": {
+        "product": "Atlas-Inf sparkrun recipe qwen3.8-27b-nvfp4-agentic",
+        "url": "https://github.com/Atlas-Inf/sparkrun-recipes/blob/a8810aeb2bcd5f8a43b1e3fd5b7ad7ae10735370/recipes/qwen3.8/qwen3.8-27b-nvfp4-agentic.yaml"
+      },
+      "engine": {
+        "image": "ghcr.io/atlas-inf/atlas-gb10@sha256:0a75306346baf0dcbe56a2aae677247b62ce468db031e5b06cdfa71cb0b156f4",
+        "atlas_repo": "https://github.com/Atlas-Inf/atlas",
+        "atlas_commit": "b9a7edad853053bc3248e4d1bc30fcacef78675f"
+      },
+      "weights": [
+        {
+          "repo": "nvidia/Qwen3.8-27B-NVFP4",
+          "revision": "482ca0f3832238542f8f5295dde86b5f22711d80",
+          "size_gib": 20.4,
+          "license": "Apache-2.0",
+          "license_url": "https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4",
+          "noncommercial": false
+        }
+      ],
+      "extra_disk_gib": 0,
+      "launcher": {
+        "file": "launchers/atlas-gb10.sh",
+        "origin": "Shrug"
+      },
+      "container_name": "shrug-rank{rank}",
+      "api_port": 8893,
+      "args": [
+        "--image", "{image}",
+        "--model-root", "{model_root}",
+        "--checkpoint", "nvidia--Qwen3.8-27B-NVFP4",
+        "--cuda-cache", "{cuda_cache}",
+        "--name", "{name}",
+        "--",
+        "--host", "127.0.0.1",
+        "--port", "8893",
+        "--no-tui",
+        "--model-name", "qwen3.8-27b-atlas",
+        "--kernel-target", "qwen3.8-27b",
+        "--max-seq-len", "131072",
+        "--max-batch-size", "1",
+        "--gpu-memory-utilization", "0.85",
+        "--kv-cache-dtype", "fp8",
+        "--lm-head-dtype", "bf16",
+        "--kv-high-precision-layers", "auto",
+        "--scheduling-policy", "slai",
+        "--enable-prefix-caching",
+        "--ssm-cache-slots", "256",
+        "--ssm-checkpoint-interval", "16",
+        "--speculative",
+        "--num-drafts", "3",
+        "--mtp-quantization", "bf16",
+        "--video-allow-ffmpeg"
+      ],
+      "receipts": [
+        "https://github.com/Atlas-Inf/sparkrun-recipes/blob/a8810aeb2bcd5f8a43b1e3fd5b7ad7ae10735370/recipes/qwen3.8/qwen3.8-27b-nvfp4-agentic.yaml"
+      ],
+      "notes": "The upstream agentic recipe's flags, with the 131072-token context and FP8 KV cache that the recipe itself recommends for day-to-day agentic coding. Its measured gate runs used 32K and BF16 KV; quality above about 24K is not characterized on these weights."
+    },
+    {
+      "id": "qwen3.8-flash-next-1x",
+      "name": "Qwen3.8-Flash-Next on one Spark",
+      "summary": "About 180B hybrid MoE in one Spark, its n-gram table read from NVMe. 32K context, one request at a time; prefill is slow.",
+      "model_id": "qwen3.8-flash-next-atlas",
+      "sparks": 1,
+      "topologies": ["single"],
+      "role": "agent",
+      "context_tokens": 32768,
+      "concurrency": 1,
+      "qualified_by": "Atlas-Inf",
+      "source": {
+        "product": "Atlas-Inf sparkrun recipe qwen3.8-flash-next-nvfp4",
+        "url": "https://github.com/Atlas-Inf/sparkrun-recipes/blob/a8810aeb2bcd5f8a43b1e3fd5b7ad7ae10735370/recipes/qwen3.8/qwen3.8-flash-next-nvfp4.yaml"
+      },
+      "engine": {
+        "image": "ghcr.io/atlas-inf/atlas-gb10@sha256:0a75306346baf0dcbe56a2aae677247b62ce468db031e5b06cdfa71cb0b156f4",
+        "atlas_repo": "https://github.com/Atlas-Inf/atlas",
+        "atlas_commit": "b9a7edad853053bc3248e4d1bc30fcacef78675f"
+      },
+      "weights": [
+        {
+          "repo": "nvidia/Qwen3.8-Flash-Next-NVFP4",
+          "revision": "fc694b54fb0174e0913e6adf86691ef85a4ead47",
+          "size_gib": 123.6,
+          "license": "NVIDIA Open Model Agreement; base model under the Qwen Community License",
+          "license_url": "https://huggingface.co/nvidia/Qwen3.8-Flash-Next-NVFP4",
+          "noncommercial": false
+        }
+      ],
+      "extra_disk_gib": 0,
+      "launcher": {
+        "file": "launchers/atlas-gb10.sh",
+        "origin": "Shrug"
+      },
+      "container_name": "shrug-rank{rank}",
+      "api_port": 8893,
+      "args": [
+        "--image", "{image}",
+        "--model-root", "{model_root}",
+        "--checkpoint", "nvidia--Qwen3.8-Flash-Next-NVFP4",
+        "--cuda-cache", "{cuda_cache}",
+        "--name", "{name}",
+        "--",
+        "--host", "127.0.0.1",
+        "--port", "8893",
+        "--no-tui",
+        "--model-name", "qwen3.8-flash-next-atlas",
+        "--kernel-target", "qwen3.8-flash-next",
+        "--max-seq-len", "32768",
+        "--max-prefill-tokens", "8192",
+        "--kv-cache-dtype", "bf16",
+        "--gpu-memory-utilization", "0.90",
+        "--max-num-seqs", "1",
+        "--max-batch-size", "1",
+        "--speculative",
+        "--num-drafts", "1",
+        "--enable-prefix-caching",
+        "--fast-load-prefetch-shards",
+        "--default-chat-template-kwargs", "{\"reasoning_effort\":\"low\"}"
+      ],
+      "receipts": [
+        "https://github.com/Atlas-Inf/sparkrun-recipes/blob/a8810aeb2bcd5f8a43b1e3fd5b7ad7ae10735370/recipes/qwen3.8/qwen3.8-flash-next-nvfp4.yaml"
+      ],
+      "notes": "The upstream recipe's flags unchanged. Upstream measured 16.5 tok/s decode without speculation and 747 tok/s prefill at a 2,191-token prompt."
+    },
+    {
+      "id": "glm-5.3-flash-2x",
+      "name": "GLM-5.3-Flash on two Sparks",
+      "summary": "SparkGLM 0.1.0, Spark mode: tensor-parallel over a pair, 1M context, four requests.",
+      "model_id": "glm-5.3-flash-atlas",
+      "sparks": 2,
+      "topologies": ["pair"],
+      "role": "agent",
+      "context_tokens": 1048576,
+      "concurrency": 4,
+      "qualified_by": "Enntity",
+      "source": {
+        "product": "SparkGLM 0.1.0",
+        "url": "https://github.com/Enntity/sparkglm/releases/tag/v0.1.0",
+        "repo": "https://github.com/Enntity/sparkglm",
+        "commit": "68b71e058420e819d9e0c80893eb75f852dacb3c"
+      },
+      "engine": {
+        "image": "ghcr.io/enntity/atlas-sparkglm@sha256:cf5dfc323bbe34c165c6e7bd5824e9ef25e356d81cb9da1d233ccd6edd875b0a",
+        "atlas_repo": "https://github.com/Enntity/atlas",
+        "atlas_commit": "095ff2237f0c79bbaaf4c38217c4fd35458e1f41"
+      },
+      "weights": [
+        {
+          "repo": "nvidia/GLM-5.3-Flash-FP4-Local",
+          "revision": "76348ddb2be2e35e39ecfc00e75dc07703f4f3d5",
+          "size_gib": 165.3,
+          "license": "NVIDIA Open Model Agreement; base model under MIT",
+          "license_url": "https://huggingface.co/nvidia/GLM-5.3-Flash-FP4-Local",
+          "noncommercial": false
+        },
+        {
+          "repo": "incoai/GLM-5.3-Flash-DFlash2",
+          "revision": "7d74cdd881ed7e32c31175984a67823127b66cfe",
+          "size_gib": 2.2,
+          "license": "CC BY-NC-ND 4.0",
+          "license_url": "https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2",
+          "noncommercial": true
+        }
+      ],
+      "extra_disk_gib": 0,
+      "launcher": {
+        "file": "launchers/sparkglm-0.1.0-start-node.sh",
+        "origin": "https://github.com/Enntity/sparkglm/blob/68b71e058420e819d9e0c80893eb75f852dacb3c/install/start-node.sh"
+      },
+      "container_name": "shrug-rank{rank}",
+      "api_port": 8893,
+      "args": [
+        "--rank", "{rank}",
+        "--leader-address", "{leader_address}",
+        "--fabric-hca", "{fabric_hca}",
+        "--fabric-interface", "{fabric_interface}",
+        "--no-fabric-siblings",
+        "--model-root", "{model_root}",
+        "--checkpoint", "nvidia--GLM-5.3-Flash-FP4-Local",
+        "--image", "{image}",
+        "--profile", "4x1m",
+        "--mode", "spark",
+        "--kv-shard",
+        "--cuda-cache", "{cuda_cache}",
+        "--name", "{name}"
+      ],
+      "receipts": [
+        "https://github.com/Enntity/sparkglm/blob/68b71e058420e819d9e0c80893eb75f852dacb3c/results/2026-10-21-unified-release/RESULT.md",
+        "https://github.com/Enntity/sparkglm/blob/68b71e058420e819d9e0c80893eb75f852dacb3c/results/2026-10-22-tool-boundaries/RESULT.md"
+      ],
+      "notes": "start.sh's defaults (4x1m, KV shard on) with Spark mode, which the release measured. Spark mode needs the non-commercial DFlash2 drafter; the launcher mounts it in every mode."
+    },
+    {
+      "id": "qwen3.8-flash-next-2x",
+      "name": "Qwen3.8-Flash-Next on two Sparks",
+      "summary": "SparkQwen 0.3.1, Spark mode: tensor- and expert-parallel over a pair, 256K context, eight requests.",
+      "model_id": "qwen3.8-flash-next-atlas",
+      "sparks": 2,
+      "topologies": ["pair"],
+      "role": "agent",
+      "context_tokens": 262144,
+      "concurrency": 8,
+      "qualified_by": "Enntity",
+      "source": {
+        "product": "SparkQwen 0.3.1",
+        "url": "https://github.com/Enntity/sparkqwen/releases/tag/v0.3.1",
+        "repo": "https://github.com/Enntity/sparkqwen",
+        "commit": "017787791db9615c4754ec363e027ed54e4fd723"
+      },
+      "engine": {
+        "image": "ghcr.io/enntity/atlas-sparkqwen@sha256:b2e0ed59f66ebc61f00b6075757f90dc2a0b90100506125d68c4f52749bc6aba",
+        "atlas_repo": "https://github.com/Enntity/atlas",
+        "atlas_commit": "adb7a5b381ce0f8cafc29e37d11622c63e6ebdb9"
+      },
+      "weights": [
+        {
+          "repo": "nvidia/Qwen3.8-Flash-Next-FP4-Local",
+          "revision": "b9ce18a6887e18c089fdea8509a33e63429a3300",
+          "size_gib": 95.2,
+          "license": "NVIDIA Open Model Agreement; base model under the Qwen Community License",
+          "license_url": "https://huggingface.co/nvidia/Qwen3.8-Flash-Next-FP4-Local",
+          "noncommercial": false
+        }
+      ],
+      "extra_disk_gib": 31,
+      "launcher": {
+        "file": "launchers/sparkqwen-0.3.1-start-node.sh",
+        "origin": "https://github.com/Enntity/sparkqwen/blob/017787791db9615c4754ec363e027ed54e4fd723/install/start-node.sh"
+      },
+      "container_name": "shrug-rank{rank}",
+      "api_port": 8893,
+      "args": [
+        "--rank", "{rank}",
+        "--leader-address", "{leader_address}",
+        "--fabric-hca", "{fabric_hca}",
+        "--fabric-interface", "{fabric_interface}",
+        "--no-fabric-siblings",
+        "--model-root", "{model_root}",
+        "--checkpoint", "nvidia--Qwen3.8-Flash-Next-FP4-Local",
+        "--image", "{image}",
+        "--profile", "8x262k",
+        "--mode", "spark",
+        "--cuda-cache", "{cuda_cache}",
+        "--ple-cache", "{ple_cache}",
+        "--name", "{name}"
+      ],
+      "receipts": [
+        "https://github.com/Enntity/sparkqwen/blob/017787791db9615c4754ec363e027ed54e4fd723/results/2026-10-24-common-engine/RESULT.md"
+      ],
+      "notes": "The release's measured configuration: Spark mode, 8x262k, the profile's 0.88 utilization. Each Spark also writes a packed copy of the n-gram table (about 31 GB) on first start."
+    },
+    {
+      "id": "glm-5.3-flash-4x",
+      "name": "GLM-5.3-Flash on four Sparks",
+      "summary": "SparkGLM 0.1.0, Spark mode: tensor-parallel over four Sparks on a ring or chain, 1M context, four requests.",
+      "model_id": "glm-5.3-flash-atlas",
+      "sparks": 4,
+      "topologies": ["ring", "chain"],
+      "role": "agent",
+      "context_tokens": 1048576,
+      "concurrency": 4,
+      "qualified_by": "Enntity",
+      "source": {
+        "product": "SparkGLM 0.1.0",
+        "url": "https://github.com/Enntity/sparkglm/releases/tag/v0.1.0",
+        "repo": "https://github.com/Enntity/sparkglm",
+        "commit": "68b71e058420e819d9e0c80893eb75f852dacb3c"
+      },
+      "engine": {
+        "image": "ghcr.io/enntity/atlas-sparkglm@sha256:cf5dfc323bbe34c165c6e7bd5824e9ef25e356d81cb9da1d233ccd6edd875b0a",
+        "atlas_repo": "https://github.com/Enntity/atlas",
+        "atlas_commit": "095ff2237f0c79bbaaf4c38217c4fd35458e1f41"
+      },
+      "weights": [
+        {
+          "repo": "nvidia/GLM-5.3-Flash-FP4-Local",
+          "revision": "76348ddb2be2e35e39ecfc00e75dc07703f4f3d5",
+          "size_gib": 165.3,
+          "license": "NVIDIA Open Model Agreement; base model under MIT",
+          "license_url": "https://huggingface.co/nvidia/GLM-5.3-Flash-FP4-Local",
+          "noncommercial": false
+        },
+        {
+          "repo": "incoai/GLM-5.3-Flash-DFlash2",
+          "revision": "7d74cdd881ed7e32c31175984a67823127b66cfe",
+          "size_gib": 2.2,
+          "license": "CC BY-NC-ND 4.0",
+          "license_url": "https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2",
+          "noncommercial": true
+        }
+      ],
+      "extra_disk_gib": 0,
+      "launcher": {
+        "file": "launchers/sparkglm-0.1.0-start-node.sh",
+        "origin": "https://github.com/Enntity/sparkglm/blob/68b71e058420e819d9e0c80893eb75f852dacb3c/install/start-node.sh"
+      },
+      "container_name": "shrug-rank{rank}",
+      "api_port": 8893,
+      "args": [
+        "--world-size", "4",
+        "--topology", "{topology}",
+        "--rank", "{rank}",
+        "--leader-address", "{leader_address}",
+        "--fabric-interface", "{fabric_interface}",
+        {"flag": "--left-hca", "value": "{left_hca}", "optional": true},
+        {"flag": "--right-hca", "value": "{right_hca}", "optional": true},
+        "--model-root", "{model_root}",
+        "--checkpoint", "nvidia--GLM-5.3-Flash-FP4-Local",
+        "--image", "{image}",
+        "--profile", "4x1m-tp4",
+        "--mode", "spark",
+        "--cuda-cache", "{cuda_cache}",
+        "--name", "{name}"
+      ],
+      "receipts": [
+        "https://github.com/Enntity/sparkglm/blob/68b71e058420e819d9e0c80893eb75f852dacb3c/results/2026-10-21-unified-release/RESULT.md"
+      ],
+      "notes": "The 4x1m-tp4 profile at its 0.72 utilization, Spark mode. Ring when the closing rank 3 to rank 0 cable exists, otherwise chain. No KV shard, disk prefix cache or display carveout, as qualified."
+    }
+  ]
+}

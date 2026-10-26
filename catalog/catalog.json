@@ -1,0 +1,443 @@
+{
+  "schema": "shrug.catalog/v1",
+  "serial": 1,
+  "defaults": {
+    "1": "qwen3.8-27b-1x",
+    "2": "glm-5.3-flash-2x",
+    "3": "glm-5.3-flash-2x",
+    "4": "glm-5.3-flash-4x"
+  },
+  "releases": [
+    {
+      "id": "qwen3.8-27b-1x",
+      "name": "Qwen3.8-27B on one Spark",
+      "summary": "Dense 27B hybrid with native MTP, 128K context, one request at a time.",
+      "model_id": "qwen3.8-27b-atlas",
+      "sparks": 1,
+      "topologies": [
+        "single"
+      ],
+      "role": "agent",
+      "context_tokens": 131072,
+      "concurrency": 1,
+      "qualified_by": "Atlas-Inf",
+      "source": {
+        "product": "Atlas-Inf sparkrun recipe qwen3.8-27b-nvfp4-agentic",
+        "url": "https://github.com/Atlas-Inf/sparkrun-recipes/blob/a8810aeb2bcd5f8a43b1e3fd5b7ad7ae10735370/recipes/qwen3.8/qwen3.8-27b-nvfp4-agentic.yaml"
+      },
+      "engine": {
+        "image": "ghcr.io/atlas-inf/atlas-gb10@sha256:0a75306346baf0dcbe56a2aae677247b62ce468db031e5b06cdfa71cb0b156f4",
+        "atlas_repo": "https://github.com/Atlas-Inf/atlas",
+        "atlas_commit": "b9a7edad853053bc3248e4d1bc30fcacef78675f"
+      },
+      "weights": [
+        {
+          "repo": "nvidia/Qwen3.8-27B-NVFP4",
+          "revision": "482ca0f3832238542f8f5295dde86b5f22711d80",
+          "size_gib": 20.4,
+          "license": "Apache-2.0",
+          "license_url": "https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4",
+          "noncommercial": false
+        }
+      ],
+      "extra_disk_gib": 0,
+      "launcher": {
+        "file": "launchers/atlas-gb10.sh",
+        "origin": "Shrug",
+        "script": "#!/usr/bin/env bash\n# SPDX-License-Identifier: AGPL-3.0-only\n# Start the Atlas GB10 engine in Docker on one Spark. Shrug renders the\n# arguments from the catalog release and pipes this script to bash -s.\nset -euo pipefail\n\nimage= model_root= checkpoint= cuda_cache= name=\nwhile [ $# -gt 0 ]; do\n  case \"$1\" in\n    --image) image=$2; shift 2 ;;\n    --model-root) model_root=$2; shift 2 ;;\n    --checkpoint) checkpoint=$2; shift 2 ;;\n    --cuda-cache) cuda_cache=$2; shift 2 ;;\n    --name) name=$2; shift 2 ;;\n    --) shift; break ;;\n    *) echo \"atlas-gb10: unknown argument $1\" >&2; exit 2 ;;\n  esac\ndone\nfor v in image model_root checkpoint cuda_cache name; do\n  eval \"test -n \\\"\\$$v\\\"\" || { echo \"atlas-gb10: --$v is required\" >&2; exit 2; }\ndone\n\nckpt=$(realpath \"$model_root/$checkpoint\")\n[ -f \"$ckpt/config.json\" ] || { echo \"atlas-gb10: no checkpoint at $ckpt\" >&2; exit 1; }\nmkdir -p \"$cuda_cache\"\ndocker rm -f \"$name\" >/dev/null 2>&1 || true\n\ndocker run -d --name \"$name\" --restart no --network host --ipc host \\\n  --shm-size 32g --memory 114g --gpus all \\\n  --cap-add IPC_LOCK --cap-add SYS_NICE --ulimit memlock=-1:-1 \\\n  --security-opt no-new-privileges=true --stop-timeout 60 \\\n  --mount \"type=bind,src=$ckpt,dst=$ckpt,readonly\" \\\n  --mount \"type=bind,src=$cuda_cache,dst=/atlas-cuda-cache\" \\\n  -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 \\\n  -e CUDA_CACHE_PATH=/atlas-cuda-cache -e CUDA_CACHE_MAXSIZE=4294967296 \\\n  \"$image\" serve \"$ckpt\" \"$@\"\n",
+        "sha256": "16f84b6ff539bf8f44fac923a40687c2a1bd28ea289a9d7775b8f0d83b4955de"
+      },
+      "container_name": "shrug-rank{rank}",
+      "api_port": 8893,
+      "args": [
+        "--image",
+        "{image}",
+        "--model-root",
+        "{model_root}",
+        "--checkpoint",
+        "nvidia--Qwen3.8-27B-NVFP4",
+        "--cuda-cache",
+        "{cuda_cache}",
+        "--name",
+        "{name}",
+        "--",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8893",
+        "--no-tui",
+        "--model-name",
+        "qwen3.8-27b-atlas",
+        "--kernel-target",
+        "qwen3.8-27b",
+        "--max-seq-len",
+        "131072",
+        "--max-batch-size",
+        "1",
+        "--gpu-memory-utilization",
+        "0.85",
+        "--kv-cache-dtype",
+        "fp8",
+        "--lm-head-dtype",
+        "bf16",
+        "--kv-high-precision-layers",
+        "auto",
+        "--scheduling-policy",
+        "slai",
+        "--enable-prefix-caching",
+        "--ssm-cache-slots",
+        "256",
+        "--ssm-checkpoint-interval",
+        "16",
+        "--speculative",
+        "--num-drafts",
+        "3",
+        "--mtp-quantization",
+        "bf16",
+        "--video-allow-ffmpeg"
+      ],
+      "receipts": [
+        "https://github.com/Atlas-Inf/sparkrun-recipes/blob/a8810aeb2bcd5f8a43b1e3fd5b7ad7ae10735370/recipes/qwen3.8/qwen3.8-27b-nvfp4-agentic.yaml"
+      ],
+      "notes": "The upstream agentic recipe's flags, with the 131072-token context and FP8 KV cache that the recipe itself recommends for day-to-day agentic coding. Its measured gate runs used 32K and BF16 KV; quality above about 24K is not characterized on these weights."
+    },
+    {
+      "id": "qwen3.8-flash-next-1x",
+      "name": "Qwen3.8-Flash-Next on one Spark",
+      "summary": "About 180B hybrid MoE in one Spark, its n-gram table read from NVMe. 32K context, one request at a time; prefill is slow.",
+      "model_id": "qwen3.8-flash-next-atlas",
+      "sparks": 1,
+      "topologies": [
+        "single"
+      ],
+      "role": "agent",
+      "context_tokens": 32768,
+      "concurrency": 1,
+      "qualified_by": "Atlas-Inf",
+      "source": {
+        "product": "Atlas-Inf sparkrun recipe qwen3.8-flash-next-nvfp4",
+        "url": "https://github.com/Atlas-Inf/sparkrun-recipes/blob/a8810aeb2bcd5f8a43b1e3fd5b7ad7ae10735370/recipes/qwen3.8/qwen3.8-flash-next-nvfp4.yaml"
+      },
+      "engine": {
+        "image": "ghcr.io/atlas-inf/atlas-gb10@sha256:0a75306346baf0dcbe56a2aae677247b62ce468db031e5b06cdfa71cb0b156f4",
+        "atlas_repo": "https://github.com/Atlas-Inf/atlas",
+        "atlas_commit": "b9a7edad853053bc3248e4d1bc30fcacef78675f"
+      },
+      "weights": [
+        {
+          "repo": "nvidia/Qwen3.8-Flash-Next-NVFP4",
+          "revision": "fc694b54fb0174e0913e6adf86691ef85a4ead47",
+          "size_gib": 123.6,
+          "license": "NVIDIA Open Model Agreement; base model under the Qwen Community License",
+          "license_url": "https://huggingface.co/nvidia/Qwen3.8-Flash-Next-NVFP4",
+          "noncommercial": false
+        }
+      ],
+      "extra_disk_gib": 0,
+      "launcher": {
+        "file": "launchers/atlas-gb10.sh",
+        "origin": "Shrug",
+        "script": "#!/usr/bin/env bash\n# SPDX-License-Identifier: AGPL-3.0-only\n# Start the Atlas GB10 engine in Docker on one Spark. Shrug renders the\n# arguments from the catalog release and pipes this script to bash -s.\nset -euo pipefail\n\nimage= model_root= checkpoint= cuda_cache= name=\nwhile [ $# -gt 0 ]; do\n  case \"$1\" in\n    --image) image=$2; shift 2 ;;\n    --model-root) model_root=$2; shift 2 ;;\n    --checkpoint) checkpoint=$2; shift 2 ;;\n    --cuda-cache) cuda_cache=$2; shift 2 ;;\n    --name) name=$2; shift 2 ;;\n    --) shift; break ;;\n    *) echo \"atlas-gb10: unknown argument $1\" >&2; exit 2 ;;\n  esac\ndone\nfor v in image model_root checkpoint cuda_cache name; do\n  eval \"test -n \\\"\\$$v\\\"\" || { echo \"atlas-gb10: --$v is required\" >&2; exit 2; }\ndone\n\nckpt=$(realpath \"$model_root/$checkpoint\")\n[ -f \"$ckpt/config.json\" ] || { echo \"atlas-gb10: no checkpoint at $ckpt\" >&2; exit 1; }\nmkdir -p \"$cuda_cache\"\ndocker rm -f \"$name\" >/dev/null 2>&1 || true\n\ndocker run -d --name \"$name\" --restart no --network host --ipc host \\\n  --shm-size 32g --memory 114g --gpus all \\\n  --cap-add IPC_LOCK --cap-add SYS_NICE --ulimit memlock=-1:-1 \\\n  --security-opt no-new-privileges=true --stop-timeout 60 \\\n  --mount \"type=bind,src=$ckpt,dst=$ckpt,readonly\" \\\n  --mount \"type=bind,src=$cuda_cache,dst=/atlas-cuda-cache\" \\\n  -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 \\\n  -e CUDA_CACHE_PATH=/atlas-cuda-cache -e CUDA_CACHE_MAXSIZE=4294967296 \\\n  \"$image\" serve \"$ckpt\" \"$@\"\n",
+        "sha256": "16f84b6ff539bf8f44fac923a40687c2a1bd28ea289a9d7775b8f0d83b4955de"
+      },
+      "container_name": "shrug-rank{rank}",
+      "api_port": 8893,
+      "args": [
+        "--image",
+        "{image}",
+        "--model-root",
+        "{model_root}",
+        "--checkpoint",
+        "nvidia--Qwen3.8-Flash-Next-NVFP4",
+        "--cuda-cache",
+        "{cuda_cache}",
+        "--name",
+        "{name}",
+        "--",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8893",
+        "--no-tui",
+        "--model-name",
+        "qwen3.8-flash-next-atlas",
+        "--kernel-target",
+        "qwen3.8-flash-next",
+        "--max-seq-len",
+        "32768",
+        "--max-prefill-tokens",
+        "8192",
+        "--kv-cache-dtype",
+        "bf16",
+        "--gpu-memory-utilization",
+        "0.90",
+        "--max-num-seqs",
+        "1",
+        "--max-batch-size",
+        "1",
+        "--speculative",
+        "--num-drafts",
+        "1",
+        "--enable-prefix-caching",
+        "--fast-load-prefetch-shards",
+        "--default-chat-template-kwargs",
+        "{\"reasoning_effort\":\"low\"}"
+      ],
+      "receipts": [
+        "https://github.com/Atlas-Inf/sparkrun-recipes/blob/a8810aeb2bcd5f8a43b1e3fd5b7ad7ae10735370/recipes/qwen3.8/qwen3.8-flash-next-nvfp4.yaml"
+      ],
+      "notes": "The upstream recipe's flags unchanged. Upstream measured 16.5 tok/s decode without speculation and 747 tok/s prefill at a 2,191-token prompt."
+    },
+    {
+      "id": "glm-5.3-flash-2x",
+      "name": "GLM-5.3-Flash on two Sparks",
+      "summary": "SparkGLM 0.1.0, Spark mode: tensor-parallel over a pair, 1M context, four requests.",
+      "model_id": "glm-5.3-flash-atlas",
+      "sparks": 2,
+      "topologies": [
+        "pair"
+      ],
+      "role": "agent",
+      "context_tokens": 1048576,
+      "concurrency": 4,
+      "qualified_by": "Enntity",
+      "source": {
+        "product": "SparkGLM 0.1.0",
+        "url": "https://github.com/Enntity/sparkglm/releases/tag/v0.1.0",
+        "repo": "https://github.com/Enntity/sparkglm",
+        "commit": "68b71e058420e819d9e0c80893eb75f852dacb3c"
+      },
+      "engine": {
+        "image": "ghcr.io/enntity/atlas-sparkglm@sha256:cf5dfc323bbe34c165c6e7bd5824e9ef25e356d81cb9da1d233ccd6edd875b0a",
+        "atlas_repo": "https://github.com/Enntity/atlas",
+        "atlas_commit": "095ff2237f0c79bbaaf4c38217c4fd35458e1f41"
+      },
+      "weights": [
+        {
+          "repo": "nvidia/GLM-5.3-Flash-FP4-Local",
+          "revision": "76348ddb2be2e35e39ecfc00e75dc07703f4f3d5",
+          "size_gib": 165.3,
+          "license": "NVIDIA Open Model Agreement; base model under MIT",
+          "license_url": "https://huggingface.co/nvidia/GLM-5.3-Flash-FP4-Local",
+          "noncommercial": false
+        },
+        {
+          "repo": "incoai/GLM-5.3-Flash-DFlash2",
+          "revision": "7d74cdd881ed7e32c31175984a67823127b66cfe",
+          "size_gib": 2.2,
+          "license": "CC BY-NC-ND 4.0",
+          "license_url": "https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2",
+          "noncommercial": true
+        }
+      ],
+      "extra_disk_gib": 0,
+      "launcher": {
+        "file": "launchers/sparkglm-0.1.0-start-node.sh",
+        "origin": "https://github.com/Enntity/sparkglm/blob/68b71e058420e819d9e0c80893eb75f852dacb3c/install/start-node.sh",
+        "script": "#!/usr/bin/env bash\n# SPDX-License-Identifier: AGPL-3.0-only\n# Start one rank of the Atlas SparkGLM image without LLooM. Start rank 1 (the\n# worker) first, then rank 0 (the leader, which serves the OpenAI API on\n# 127.0.0.1:8893). Container flags, mounts and environment match the LLooM\n# recipe linux-nvidia-dgx-spark-2x-glm53-atlas; this script only starts the\n# prepared image and never builds, downloads or converts anything.\nset -euo pipefail\nusage() {\n  cat >&2 <<'EOF'\nusage: start-node.sh --rank 0-3 --leader-address IP --model-root DIR --image TAG\n                     [--fabric-interface IFACE] [--fabric-hca DEVICE[,DEVICE...]]\n                     [--world-size 2|4 [--topology chain|ring] [--left-hca DEVICE[,...]] [--right-hca DEVICE[,...]]]\n                     [--mode strict|spark] [--strict-mtp] [--profile 4x1m|4x512k|8x128k|4x1m-tp4|FILE] [--gpu-memory-utilization 0.80-0.95 (0.60- on four Sparks)]\n                     [--prefix-cache-dir DIR [--prefix-cache-gb 16-100]]\n                     [--display-carveout] [--kv-shard] [--no-fabric-siblings] [--checkpoint NAME]\n                     [--cuda-cache DIR] [--name NAME]\n\n  --leader-address   rank 0's IPv4 address on the direct Spark-to-Spark fabric\n  --model-root       directory holding the checkpoint and\n                     incoai--GLM-5.3-Flash-DFlash2\n  --checkpoint       the checkpoint's directory under --model-root (default:\n                     the pinned nvidia--GLM-5.3-Flash-FP4-Local, served as\n                     published); nvidia--GLM-5.3-Flash-NVFP4 is served through\n                     the atlas-overlay convert.sh writes beside it\n  --image            the image tag, install/build.sh --tag\n  --fabric-interface the fabric's network interface on THIS node (default: the\n                     interface of the first --fabric-hca; otherwise required)\n  --no-fabric-siblings  compatibility option; explicit HCA lists are always\n                     passed without adding another device\n  --world-size       Sparks serving together (default 2). With 4, wired as a\n                     chain rank 0-1-2-3 or ring 0-1-2-3-0; start workers then 0;\n                     --rank goes up to 3, --fabric-interface is this node's\n                     interface for NCCL's startup traffic (every Spark must\n                     reach the others' addresses on it; --leader-address is\n                     rank 0's address there) and replaces --fabric-hca\n  --topology         chain (default for TP4) or ring; ring requires the 3-0 link\n  --left-hca         with --world-size 4: devices to rank - 1 (modulo 4 for ring)\n  --right-hca        with --world-size 4: devices to rank + 1 (modulo 4 for ring)\n  --mode             strict (default) or spark; same on every rank\n  --strict-mtp       native MTP in strict mode; retains profile capacity and prefix cache\n  --profile          a profile shipped in the image (TP2 default 4x512k, TP4 4x1m-tp4) or a JSON\n                     file of your own; use the same one on every rank\n  --gpu-memory-utilization  share of unified memory for the engine (default:\n                     the profile's: 0.88, or 0.72 on four Sparks); raise it on dedicated hosts for a\n                     larger KV pool and prefix cache\n  --prefix-cache-dir keep evicted prefix-cache entries in this directory on\n                     the node's own disk (ext4/xfs) instead of dropping them\n                     (default: off)\n  --prefix-cache-gb  their disk budget in GiB (default 48); the same on every rank\n  --display-carveout lend the GB10's 2 GiB display carveout to the KV cache\n                     (2 GiB more KV cache); use it on every rank (default: off)\n  --kv-shard         split latent KV ownership across the Sparks; enable it on\n                     every rank (default: off)\n  --cuda-cache       persistent CUDA JIT cache (default: ~/.cache/atlas-cuda)\nEOF\n  exit 2\n}\nrank=\"\" leader=\"\" iface=\"\" model_root=\"\" image=\"\" hca=\"\" world=2 left_hca=\"\" right_hca=\"\"\ncache=\"$HOME/.cache/atlas-cuda\" name=\"\" profile=4x512k util=\"\" pc_dir=\"\" pc_gb=\"\" carveout=\"\" siblings=0 kvshard=0\nmode=\"\"\nmode_given=0\ntopology=\"\"\nprofile_given=0\nstrict_mtp=0\ncheckpoint_name=nvidia--GLM-5.3-Flash-FP4-Local\nwhile [[ $# -gt 0 ]]; do\n  case \"$1\" in\n    --rank) rank=$2; shift 2 ;;\n    --leader-address) leader=$2; shift 2 ;;\n    --fabric-interface) iface=$2; shift 2 ;;\n    --fabric-hca) hca=$2; shift 2 ;;\n    --world-size) world=$2; shift 2 ;;\n    --topology) topology=$2; shift 2 ;;\n    --left-hca) left_hca=$2; shift 2 ;;\n    --right-hca) right_hca=$2; shift 2 ;;\n    --model-root) model_root=$2; shift 2 ;;\n    --image) image=$2; shift 2 ;;\n    --cuda-cache) cache=$2; shift 2 ;;\n    --checkpoint) checkpoint_name=$2; shift 2 ;;\n    --name) name=$2; shift 2 ;;\n    --profile) profile=$2; profile_given=1; shift 2 ;;\n    --mode) mode=$2; mode_given=1; shift 2 ;;\n    --strict-mtp) strict_mtp=1; shift ;;\n    --gpu-memory-utilization) util=$2; shift 2 ;;\n    --prefix-cache-dir) pc_dir=$2; shift 2 ;;\n    --prefix-cache-gb) pc_gb=$2; shift 2 ;;\n    --display-carveout) carveout=1; shift ;;\n    --kv-shard) kvshard=1; shift ;;\n    --no-fabric-siblings) siblings=0; shift ;;\n    *) usage ;;\n  esac\ndone\n[[ $world == 2 || $world == 4 ]] && [[ $rank =~ ^[0-9]$ ]] && (( rank < world )) &&\n  [[ -n $leader && -n $model_root && -n $image ]] || usage\nif [[ $mode_given == 0 ]]; then mode=strict; fi\n[[ $mode == strict || $mode == spark ]] || { echo \"--mode must be strict or spark\" >&2; exit 2; }\n[[ $strict_mtp == 0 || $mode == strict ]] || { echo \"--strict-mtp requires strict mode\" >&2; exit 2; }\nif [[ $world == 2 ]]; then\n  topology=${topology:-pair}\n  [[ $topology == pair ]] || { echo \"two Sparks require pair topology\" >&2; exit 2; }\nelse\n  topology=${topology:-chain}\n  [[ $topology == chain || $topology == ring ]] || { echo \"--topology must be chain or ring\" >&2; exit 2; }\n  if [[ $profile_given == 0 ]]; then profile=4x1m-tp4; fi\nfi\n\nsysfs=${FABRIC_SYSFS:-/sys/class/infiniband}\n# check_rails LIST: every device named once, up and well formed.\ncheck_rails() {\n  [[ $1 =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*(,[a-zA-Z0-9_][a-zA-Z0-9_.-]*)*$ ]] ||\n    { echo \"invalid RDMA device list $1\" >&2; exit 2; }\n  local rail seen=,\n  IFS=',' read -r -a rails <<< \"$1\"\n  for rail in \"${rails[@]}\"; do\n    [[ $seen != *,\"$rail\",* ]] || { echo \"duplicate RDMA device $rail\" >&2; exit 2; }\n    seen+=\"$rail,\"\n    grep -qs ACTIVE \"$sysfs/$rail/ports/1/state\" ||\n      { echo \"RDMA device $rail is missing or down\" >&2; exit 2; }\n  done\n}\nif (( world > 2 )); then\n  [[ -z $hca ]] || { echo \"a chain takes --left-hca and --right-hca, not --fabric-hca\" >&2; exit 2; }\n  [[ $iface =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]] || { echo \"a chain needs --fabric-interface\" >&2; exit 2; }\n  if (( rank > 0 )) || [[ $topology == ring ]]; then [[ -n $left_hca ]] || { echo \"rank $rank needs --left-hca\" >&2; exit 2; }\n  else [[ -z $left_hca ]] || { echo \"rank 0 has no left neighbour\" >&2; exit 2; }; fi\n  if (( rank < world - 1 )) || [[ $topology == ring ]]; then [[ -n $right_hca ]] || { echo \"rank $rank needs --right-hca\" >&2; exit 2; }\n  else [[ -z $right_hca ]] || { echo \"rank $rank has no right neighbour\" >&2; exit 2; }; fi\n  for list in \"$left_hca\" \"$right_hca\"; do [[ -z $list ]] || check_rails \"$list\"; done\n  if [[ -n $left_hca && -n $right_hca ]]; then\n    check_rails \"$left_hca,$right_hca\"\n  fi\nelse\n  [[ -z $left_hca && -z $right_hca ]] || { echo \"--left-hca and --right-hca need --world-size 4\" >&2; exit 2; }\n  if [[ -z $hca ]]; then\n    [[ -n $iface ]] || { echo \"pass --fabric-hca or --fabric-interface; no port is assumed\" >&2; exit 2; }\n    matches=()\n    for dev in \"$sysfs\"/*; do\n      [[ -e $dev/device/net/$iface ]] && matches+=(\"${dev##*/}\")\n    done\n    [[ ${#matches[@]} == 1 ]] || { echo \"ambiguous or missing RDMA device for $iface; pass --fabric-hca\" >&2; exit 2; }\n    hca=${matches[0]}\n  fi\n  check_rails \"$hca\"\n  if [[ -z $iface ]]; then\n    primary=${hca%%,*}\n    matches=(\"$sysfs/$primary\"/device/net/*)\n    [[ ${#matches[@]} == 1 && -e ${matches[0]} ]] ||\n      { echo \"ambiguous or missing network interface for $primary; pass --fabric-interface\" >&2; exit 2; }\n    iface=${matches[0]##*/}\n  fi\n  [[ $iface =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ && -e $sysfs/${hca%%,*}/device/net/$iface ]] ||\n    { echo \"--fabric-interface must belong to the first --fabric-hca device\" >&2; exit 2; }\nfi\n[[ $checkpoint_name =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]] ||\n  { echo \"--checkpoint must be one directory name under --model-root\" >&2; exit 2; }\nmodel_root=$(realpath \"$model_root\")\ncheckpoint=\"$model_root/$checkpoint_name\"\ndrafter=\"$model_root/incoai--GLM-5.3-Flash-DFlash2\"\nmodel=$checkpoint\nmodel_mounts=(--mount \"type=bind,src=$checkpoint,dst=$checkpoint,readonly\")\nrequired=(\"$checkpoint/config.json\" \"$drafter/config.json\")\n# NVIDIA's NVFP4 release ships its MTP layer in BF16; Atlas serves it through\n# the overlay convert.sh writes. The overlay links into the original\n# checkpoint, so both are mounted at the same absolute paths.\nif [[ $checkpoint_name == nvidia--GLM-5.3-Flash-NVFP4 ]]; then\n  model=\"$model_root/atlas-overlay\"\n  model_mounts+=(--mount \"type=bind,src=$model,dst=$model,readonly\")\n  required+=(\"$model/sparkglm-verified.json\")\nfi\nfor path in \"${required[@]}\"; do\n  [[ -f $path ]] || { echo \"missing $path\" >&2; exit 2; }\ndone\nmkdir -p \"$cache\"\nprofile_mount=()\nif [[ $profile == */* || $profile == *.json ]] && [[ ! -f $profile ]]; then\n  echo \"missing profile file $profile\" >&2; exit 2\nfi\nif [[ -f $profile ]]; then\n  profile_mount=(--mount \"type=bind,src=$(realpath \"$profile\"),dst=/opt/atlas/profiles/custom.json,readonly\")\n  profile=custom\nfi\nif [[ -n $pc_dir || -n $pc_gb ]]; then\n  pc_gb=${pc_gb:-48}\n  [[ $pc_dir == /* && $pc_dir != *,* ]] || { echo \"--prefix-cache-dir must be set to an absolute path without commas\" >&2; exit 2; }\n  [[ $pc_gb =~ ^[1-9][0-9]{1,2}$ ]] && (( pc_gb >= 16 && pc_gb <= 100 )) ||\n    { echo \"--prefix-cache-gb must be a whole number from 16 to 100\" >&2; exit 2; }\nfi\nname=${name:-atlas-sparkglm-rank$rank}\n# The engine unlinks its cache files while they are open and sweeps any a crash\n# left behind, so nothing carries over a restart.\npc_args=()\nif [[ -n $pc_dir ]]; then\n  mkdir -p \"$pc_dir/kv\" \"$pc_dir/ssm\"\n  pc_dir=$(realpath \"$pc_dir\")\n  case $(stat -f -c %T \"$pc_dir\" 2>/dev/null) in\n    tmpfs | ramfs | overlayfs) echo \"--prefix-cache-dir $pc_dir is not on a disk\" >&2; exit 2 ;;\n  esac\n  free_kb=$(df -Pk \"$pc_dir\" | awk 'NR == 2 {print $4}')\n  (( free_kb >= pc_gb * 1048576 )) ||\n    { echo \"--prefix-cache-dir $pc_dir has $((free_kb / 1048576)) GiB free; --prefix-cache-gb needs $pc_gb\" >&2; exit 2; }\n  pc_args=(--mount \"type=bind,src=$pc_dir,dst=/prefix-cache\" -e SPARKGLM_PREFIX_CACHE_GB=\"$pc_gb\")\nfi\n# One process per host may hold the carveout; every container shares this\n# host directory's lock file, which the server holds while it runs.\ncarveout_args=()\nif [[ -n $carveout ]]; then\n  lock_dir=/run/lock/sparkglm\n  mkdir -p \"$lock_dir\" && chmod 1777 \"$lock_dir\" 2>/dev/null || true\n  carveout_args=(--mount \"type=bind,src=$lock_dir,dst=$lock_dir\"\n    -e SPARKGLM_DISPLAY_CARVEOUT=1)\nfi\ndocker rm -f \"$name\" >/dev/null 2>&1 || true\ndocker run -d --name \"$name\" --restart no --network host --ipc host \\\n  --shm-size 32g --memory 114g --gpus all --device /dev/infiniband:/dev/infiniband \\\n  --cap-add IPC_LOCK --cap-add SYS_NICE --ulimit memlock=-1:-1 \\\n  --security-opt no-new-privileges=true --stop-timeout 60 \\\n  \"${model_mounts[@]}\" \\\n  --mount \"type=bind,src=$drafter,dst=$drafter,readonly\" \\\n  --mount \"type=bind,src=$cache,dst=/atlas-cuda-cache\" ${profile_mount[@]+\"${profile_mount[@]}\"} ${pc_args[@]+\"${pc_args[@]}\"} \\\n  ${carveout_args[@]+\"${carveout_args[@]}\"} \\\n  -e NODE_RANK=\"$rank\" -e MASTER_ADDR=\"$leader\" -e MASTER_PORT=29510 \\\n  -e FABRIC_INTERFACE=\"$iface\" -e FABRIC_HCA=\"$hca\" -e FABRIC_SIBLINGS=\"$siblings\" -e SPARKGLM_KV_SHARD=\"$kvshard\" \\\n  -e FABRIC_LEFT_HCA=\"$left_hca\" -e FABRIC_RIGHT_HCA=\"$right_hca\" -e SPARKGLM_TOPOLOGY=\"$topology\" \\\n  -e MODEL_PATH=\"$model\" -e DRAFTER_PATH=\"$drafter\" \\\n  -e SPARKGLM_STRICT_MTP=\"$strict_mtp\" \\\n  -e SERVED_MODEL_NAME=glm-5.3-flash-atlas -e SPARKGLM_PROFILE=\"$profile\" ${mode:+-e SPARKGLM_MODE=\"$mode\"} \\\n  ${util:+-e SPARKGLM_GPU_MEMORY_UTILIZATION=\"$util\"} \\\n  -e ATLAS_WORLD_SIZE=\"$world\" -e ATLAS_TP_SIZE=\"$world\" -e ATLAS_EP_SIZE=\"$world\" -e ATLAS_CONTEXT_WINDOW=524288 \\\n  -e NCCL_SOCKET_IFNAME=\"$iface\" -e GLOO_SOCKET_IFNAME=\"$iface\" -e NCCL_IB_HCA=\"$hca\" \\\n  -e NCCL_IB_ADDR_FAMILY=AF_INET -e NCCL_IB_ROCE_VERSION_NUM=2 -e NCCL_CROSS_NIC=0 \\\n  -e NCCL_NET=IB -e NCCL_IB_DISABLE=0 -e NCCL_IB_RETRY_CNT=7 -e NCCL_IB_TIMEOUT=22 \\\n  -e NCCL_ALGO=Ring -e NCCL_PROTO=Simple -e NCCL_BUFFSIZE=33554432 -e NCCL_CUMEM_ENABLE=0 \\\n  -e NCCL_NVLS_ENABLE=0 -e NCCL_MAX_NCHANNELS=2 -e NCCL_MIN_NCHANNELS=1 \\\n  -e NCCL_DMABUF_ENABLE=0 -e NCCL_DEBUG=WARN -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 \\\n  -e CUDA_CACHE_PATH=/atlas-cuda-cache -e CUDA_CACHE_MAXSIZE=4294967296 \\\n  \"$image\"\necho \"started $name (rank $rank); follow with: docker logs -f $name\"\n",
+        "sha256": "63d2c36b48fc1665a377b9966b8547e4205962ce1faa097d53b7047566ebba99"
+      },
+      "container_name": "shrug-rank{rank}",
+      "api_port": 8893,
+      "args": [
+        "--rank",
+        "{rank}",
+        "--leader-address",
+        "{leader_address}",
+        "--fabric-hca",
+        "{fabric_hca}",
+        "--fabric-interface",
+        "{fabric_interface}",
+        "--no-fabric-siblings",
+        "--model-root",
+        "{model_root}",
+        "--checkpoint",
+        "nvidia--GLM-5.3-Flash-FP4-Local",
+        "--image",
+        "{image}",
+        "--profile",
+        "4x1m",
+        "--mode",
+        "spark",
+        "--kv-shard",
+        "--cuda-cache",
+        "{cuda_cache}",
+        "--name",
+        "{name}"
+      ],
+      "receipts": [
+        "https://github.com/Enntity/sparkglm/blob/68b71e058420e819d9e0c80893eb75f852dacb3c/results/2026-10-21-unified-release/RESULT.md",
+        "https://github.com/Enntity/sparkglm/blob/68b71e058420e819d9e0c80893eb75f852dacb3c/results/2026-10-22-tool-boundaries/RESULT.md"
+      ],
+      "notes": "start.sh's defaults (4x1m, KV shard on) with Spark mode, which the release measured. Spark mode needs the non-commercial DFlash2 drafter; the launcher mounts it in every mode."
+    },
+    {
+      "id": "qwen3.8-flash-next-2x",
+      "name": "Qwen3.8-Flash-Next on two Sparks",
+      "summary": "SparkQwen 0.3.1, Spark mode: tensor- and expert-parallel over a pair, 256K context, eight requests.",
+      "model_id": "qwen3.8-flash-next-atlas",
+      "sparks": 2,
+      "topologies": [
+        "pair"
+      ],
+      "role": "agent",
+      "context_tokens": 262144,
+      "concurrency": 8,
+      "qualified_by": "Enntity",
+      "source": {
+        "product": "SparkQwen 0.3.1",
+        "url": "https://github.com/Enntity/sparkqwen/releases/tag/v0.3.1",
+        "repo": "https://github.com/Enntity/sparkqwen",
+        "commit": "017787791db9615c4754ec363e027ed54e4fd723"
+      },
+      "engine": {
+        "image": "ghcr.io/enntity/atlas-sparkqwen@sha256:b2e0ed59f66ebc61f00b6075757f90dc2a0b90100506125d68c4f52749bc6aba",
+        "atlas_repo": "https://github.com/Enntity/atlas",
+        "atlas_commit": "adb7a5b381ce0f8cafc29e37d11622c63e6ebdb9"
+      },
+      "weights": [
+        {
+          "repo": "nvidia/Qwen3.8-Flash-Next-FP4-Local",
+          "revision": "b9ce18a6887e18c089fdea8509a33e63429a3300",
+          "size_gib": 95.2,
+          "license": "NVIDIA Open Model Agreement; base model under the Qwen Community License",
+          "license_url": "https://huggingface.co/nvidia/Qwen3.8-Flash-Next-FP4-Local",
+          "noncommercial": false
+        }
+      ],
+      "extra_disk_gib": 31,
+      "launcher": {
+        "file": "launchers/sparkqwen-0.3.1-start-node.sh",
+        "origin": "https://github.com/Enntity/sparkqwen/blob/017787791db9615c4754ec363e027ed54e4fd723/install/start-node.sh",
+        "script": "#!/usr/bin/env bash\n# SPDX-License-Identifier: AGPL-3.0-only\n# Start one rank of the Atlas SparkQwen image. Start rank 1 (the worker) first,\n# then rank 0 (the leader, which serves the OpenAI API on 127.0.0.1:8893).\n# Container flags follow SparkGLM's start-node.sh (itself after LLooM's Atlas\n# recipe); this script only starts the prepared image and never builds or\n# downloads anything.\nset -euo pipefail\nusage() {\n  cat >&2 <<'EOF'\nusage: start-node.sh --rank 0|1 --leader-address IP --model-root DIR --image TAG\n                     [--fabric-interface IFACE] [--fabric-hca DEVICE[,DEVICE...]]\n                     [--mode strict|spark] [--profile 8x32k|4x262k|8x262k|max-16x262k|saver-8x262k|hour-video|FILE] [--gpu-memory-utilization 0.70-0.95]\n                     [--checkpoint NAME] [--cuda-cache DIR] [--ple-cache DIR] [--name NAME]\n\n  --leader-address   rank 0's IPv4 address on the direct Spark-to-Spark fabric\n  --model-root       directory holding the checkpoint directory\n  --checkpoint       the checkpoint's directory under --model-root (default:\n                     the pinned nvidia--Qwen3.8-Flash-Next-FP4-Local; the\n                     Strict/Spark require the native FP4-Local format)\n  --image            the image tag, install/build.sh --tag\n  --fabric-interface the fabric's network interface on THIS node (default: the\n                     interface of the first --fabric-hca; otherwise required)\n  --mode             strict (default): BF16 draft attention/head; spark: NVFP4 draft copies\n                     Both require the pinned FP4-Local native target format.\n  --profile          a profile shipped in the image (default 8x32k) or a JSON\n                     file of your own; use the same one on both ranks\n  --gpu-memory-utilization  share of unified memory for the engine, two\n                     decimals from 0.70 to 0.95 (default: selected profile).\n                     A lower share reserves host/service memory but shrinks the\n                     shared KV token pool; no context or concurrency promise.\n  --cuda-cache       persistent CUDA JIT cache (default: ~/.cache/atlas-cuda)\n  --ple-cache        persistent packed PLE n-gram table, ~29 GB, written on the\n                     first start of an NVFP4-PLE checkpoint (default: ~/.cache/atlas-ple)\nEOF\n  exit 2\n}\nrank=\"\" leader=\"\" iface=\"\" model_root=\"\" image=\"\" hca=\"\"\ncache=\"$HOME/.cache/atlas-cuda\" ple_cache=\"$HOME/.cache/atlas-ple\" name=\"\" profile=8x32k mode=strict util=\"\" siblings=0\ncheckpoint_name=nvidia--Qwen3.8-Flash-Next-FP4-Local\nwhile [[ $# -gt 0 ]]; do\n  case \"$1\" in\n    --rank) rank=$2; shift 2 ;;\n    --leader-address) leader=$2; shift 2 ;;\n    --fabric-interface) iface=$2; shift 2 ;;\n    --fabric-hca) hca=$2; shift 2 ;;\n    --model-root) model_root=$2; shift 2 ;;\n    --image) image=$2; shift 2 ;;\n    --cuda-cache) cache=$2; shift 2 ;;\n    --ple-cache) ple_cache=$2; shift 2 ;;\n    --checkpoint) checkpoint_name=$2; shift 2 ;;\n    --name) name=$2; shift 2 ;;\n    --profile) profile=$2; shift 2 ;;\n    --mode) mode=$2; shift 2 ;;\n    --gpu-memory-utilization) util=$2; shift 2 ;;\n    --no-fabric-siblings) siblings=0; shift ;;\n    *) usage ;;\n  esac\ndone\n[[ $rank == 0 || $rank == 1 ]] && [[ -n $leader && -n $model_root && -n $image ]] || usage\n[[ $mode == strict || $mode == spark ]] || { echo '--mode must be strict or spark' >&2; exit 2; }\n[[ -z $util || $util =~ ^0\\.(7[0-9]|8[0-9]|9[0-5])$ ]] ||\n  { echo '--gpu-memory-utilization must be 0.70 to 0.95' >&2; exit 2; }\nsysfs=${FABRIC_SYSFS:-/sys/class/infiniband}\nif [[ -z $hca ]]; then\n  [[ -n $iface ]] || { echo \"pass --fabric-hca or --fabric-interface; no port is assumed\" >&2; exit 2; }\n  matches=()\n  for dev in \"$sysfs\"/*; do\n    [[ -e $dev/device/net/$iface ]] && matches+=(\"${dev##*/}\")\n  done\n  [[ ${#matches[@]} == 1 ]] || { echo \"ambiguous or missing RDMA device for $iface; pass --fabric-hca\" >&2; exit 2; }\n  hca=${matches[0]}\nfi\n[[ $hca =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*(,[a-zA-Z0-9_][a-zA-Z0-9_.-]*)*$ ]] ||\n  { echo \"invalid --fabric-hca device list\" >&2; exit 2; }\nif [[ -z $iface ]]; then\n  primary=${hca%%,*}\n  matches=(\"$sysfs/$primary\"/device/net/*)\n  [[ ${#matches[@]} == 1 && -e ${matches[0]} ]] ||\n    { echo \"ambiguous or missing network interface for $primary; pass --fabric-interface\" >&2; exit 2; }\n  iface=${matches[0]##*/}\nfi\n[[ $iface =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ && -e $sysfs/${hca%%,*}/device/net/$iface ]] ||\n  { echo \"--fabric-interface must belong to the first --fabric-hca device\" >&2; exit 2; }\nIFS=',' read -r -a rails <<< \"$hca\"\nseen=,\nfor rail in \"${rails[@]}\"; do\n  [[ $seen != *,\"$rail\",* ]] || { echo \"duplicate RDMA device $rail\" >&2; exit 2; }\n  seen+=\"$rail,\"\n  grep -qs ACTIVE \"$sysfs/$rail/ports/1/state\" ||\n    { echo \"RDMA device $rail is missing or down\" >&2; exit 2; }\ndone\n[[ $checkpoint_name =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]] ||\n  { echo \"--checkpoint must be one directory name under --model-root\" >&2; exit 2; }\nmodel_root=$(realpath \"$model_root\")\ncheckpoint=\"$model_root/$checkpoint_name\"\nfor path in \"$checkpoint/config.json\" \"$checkpoint/model.safetensors.index.json\"; do\n  [[ -f $path ]] || { echo \"missing $path\" >&2; exit 2; }\ndone\nmkdir -p \"$cache\" \"$ple_cache\"\nprofile_mount=()\nif [[ $profile == */* || $profile == *.json ]] && [[ ! -f $profile ]]; then\n  echo \"missing profile file $profile\" >&2; exit 2\nfi\nif [[ -f $profile ]]; then\n  profile_mount=(--mount \"type=bind,src=$(realpath \"$profile\"),dst=/opt/atlas/profiles/custom.json,readonly\")\n  profile=custom\nfi\n# Use the engine's cross-product lock directory. Docker creates a missing\n# bind source on the host; permissions remain host-owned.\nlock_dir=/run/lock/sparkglm\nname=${name:-atlas-sparkqwen-rank$rank}\ndocker rm -f \"$name\" >/dev/null 2>&1 || true\n# GB10 memory is shared with the host, and a host that runs out of it hangs\n# instead of killing a process. The container is capped at 114 GiB, and the\n# profile keeps the engine's load-time --oom-guard-mb=4096 margin.\ndocker run -d --name \"$name\" --restart no --network host --ipc host \\\n  --shm-size 32g --memory 114g --gpus all --device /dev/infiniband:/dev/infiniband \\\n  --cap-add IPC_LOCK --cap-add SYS_NICE --ulimit memlock=-1:-1 \\\n  --security-opt no-new-privileges=true --stop-timeout 60 \\\n  --volume \"$lock_dir:$lock_dir\" \\\n  --mount \"type=bind,src=$checkpoint,dst=$checkpoint,readonly\" \\\n  --mount \"type=bind,src=$cache,dst=/atlas-cuda-cache\" \\\n  --mount \"type=bind,src=$(realpath \"$ple_cache\"),dst=/atlas-ple\" ${profile_mount[@]+\"${profile_mount[@]}\"} \\\n  -e NODE_RANK=\"$rank\" -e MASTER_ADDR=\"$leader\" -e MASTER_PORT=29510 \\\n  -e FABRIC_INTERFACE=\"$iface\" -e FABRIC_HCA=\"$hca\" -e FABRIC_SIBLINGS=\"$siblings\" -e MODEL_PATH=\"$checkpoint\" \\\n  -e SERVED_MODEL_NAME=qwen3.8-flash-next-atlas -e SPARKQWEN_PROFILE=\"$profile\" -e SPARKQWEN_MODE=\"$mode\" \\\n  ${util:+-e SPARKQWEN_GPU_MEMORY_UTILIZATION=\"$util\"} \\\n  -e NCCL_SOCKET_IFNAME=\"$iface\" -e GLOO_SOCKET_IFNAME=\"$iface\" \\\n  -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 \\\n  -e CUDA_CACHE_PATH=/atlas-cuda-cache -e CUDA_CACHE_MAXSIZE=4294967296 \\\n  \"$image\"\necho \"started $name (rank $rank); follow with: docker logs -f $name\"\n",
+        "sha256": "fe502bce3a4fee70a291487fe12531b125835514a3977149e2f9c02d0a2087d7"
+      },
+      "container_name": "shrug-rank{rank}",
+      "api_port": 8893,
+      "args": [
+        "--rank",
+        "{rank}",
+        "--leader-address",
+        "{leader_address}",
+        "--fabric-hca",
+        "{fabric_hca}",
+        "--fabric-interface",
+        "{fabric_interface}",
+        "--no-fabric-siblings",
+        "--model-root",
+        "{model_root}",
+        "--checkpoint",
+        "nvidia--Qwen3.8-Flash-Next-FP4-Local",
+        "--image",
+        "{image}",
+        "--profile",
+        "8x262k",
+        "--mode",
+        "spark",
+        "--cuda-cache",
+        "{cuda_cache}",
+        "--ple-cache",
+        "{ple_cache}",
+        "--name",
+        "{name}"
+      ],
+      "receipts": [
+        "https://github.com/Enntity/sparkqwen/blob/017787791db9615c4754ec363e027ed54e4fd723/results/2026-10-24-common-engine/RESULT.md"
+      ],
+      "notes": "The release's measured configuration: Spark mode, 8x262k, the profile's 0.88 utilization. Each Spark also writes a packed copy of the n-gram table (about 31 GB) on first start."
+    },
+    {
+      "id": "glm-5.3-flash-4x",
+      "name": "GLM-5.3-Flash on four Sparks",
+      "summary": "SparkGLM 0.1.0, Spark mode: tensor-parallel over four Sparks on a ring or chain, 1M context, four requests.",
+      "model_id": "glm-5.3-flash-atlas",
+      "sparks": 4,
+      "topologies": [
+        "ring",
+        "chain"
+      ],
+      "role": "agent",
+      "context_tokens": 1048576,
+      "concurrency": 4,
+      "qualified_by": "Enntity",
+      "source": {
+        "product": "SparkGLM 0.1.0",
+        "url": "https://github.com/Enntity/sparkglm/releases/tag/v0.1.0",
+        "repo": "https://github.com/Enntity/sparkglm",
+        "commit": "68b71e058420e819d9e0c80893eb75f852dacb3c"
+      },
+      "engine": {
+        "image": "ghcr.io/enntity/atlas-sparkglm@sha256:cf5dfc323bbe34c165c6e7bd5824e9ef25e356d81cb9da1d233ccd6edd875b0a",
+        "atlas_repo": "https://github.com/Enntity/atlas",
+        "atlas_commit": "095ff2237f0c79bbaaf4c38217c4fd35458e1f41"
+      },
+      "weights": [
+        {
+          "repo": "nvidia/GLM-5.3-Flash-FP4-Local",
+          "revision": "76348ddb2be2e35e39ecfc00e75dc07703f4f3d5",
+          "size_gib": 165.3,
+          "license": "NVIDIA Open Model Agreement; base model under MIT",
+          "license_url": "https://huggingface.co/nvidia/GLM-5.3-Flash-FP4-Local",
+          "noncommercial": false
+        },
+        {
+          "repo": "incoai/GLM-5.3-Flash-DFlash2",
+          "revision": "7d74cdd881ed7e32c31175984a67823127b66cfe",
+          "size_gib": 2.2,
+          "license": "CC BY-NC-ND 4.0",
+          "license_url": "https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2",
+          "noncommercial": true
+        }
+      ],
+      "extra_disk_gib": 0,
+      "launcher": {
+        "file": "launchers/sparkglm-0.1.0-start-node.sh",
+        "origin": "https://github.com/Enntity/sparkglm/blob/68b71e058420e819d9e0c80893eb75f852dacb3c/install/start-node.sh",
+        "script": "#!/usr/bin/env bash\n# SPDX-License-Identifier: AGPL-3.0-only\n# Start one rank of the Atlas SparkGLM image without LLooM. Start rank 1 (the\n# worker) first, then rank 0 (the leader, which serves the OpenAI API on\n# 127.0.0.1:8893). Container flags, mounts and environment match the LLooM\n# recipe linux-nvidia-dgx-spark-2x-glm53-atlas; this script only starts the\n# prepared image and never builds, downloads or converts anything.\nset -euo pipefail\nusage() {\n  cat >&2 <<'EOF'\nusage: start-node.sh --rank 0-3 --leader-address IP --model-root DIR --image TAG\n                     [--fabric-interface IFACE] [--fabric-hca DEVICE[,DEVICE...]]\n                     [--world-size 2|4 [--topology chain|ring] [--left-hca DEVICE[,...]] [--right-hca DEVICE[,...]]]\n                     [--mode strict|spark] [--strict-mtp] [--profile 4x1m|4x512k|8x128k|4x1m-tp4|FILE] [--gpu-memory-utilization 0.80-0.95 (0.60- on four Sparks)]\n                     [--prefix-cache-dir DIR [--prefix-cache-gb 16-100]]\n                     [--display-carveout] [--kv-shard] [--no-fabric-siblings] [--checkpoint NAME]\n                     [--cuda-cache DIR] [--name NAME]\n\n  --leader-address   rank 0's IPv4 address on the direct Spark-to-Spark fabric\n  --model-root       directory holding the checkpoint and\n                     incoai--GLM-5.3-Flash-DFlash2\n  --checkpoint       the checkpoint's directory under --model-root (default:\n                     the pinned nvidia--GLM-5.3-Flash-FP4-Local, served as\n                     published); nvidia--GLM-5.3-Flash-NVFP4 is served through\n                     the atlas-overlay convert.sh writes beside it\n  --image            the image tag, install/build.sh --tag\n  --fabric-interface the fabric's network interface on THIS node (default: the\n                     interface of the first --fabric-hca; otherwise required)\n  --no-fabric-siblings  compatibility option; explicit HCA lists are always\n                     passed without adding another device\n  --world-size       Sparks serving together (default 2). With 4, wired as a\n                     chain rank 0-1-2-3 or ring 0-1-2-3-0; start workers then 0;\n                     --rank goes up to 3, --fabric-interface is this node's\n                     interface for NCCL's startup traffic (every Spark must\n                     reach the others' addresses on it; --leader-address is\n                     rank 0's address there) and replaces --fabric-hca\n  --topology         chain (default for TP4) or ring; ring requires the 3-0 link\n  --left-hca         with --world-size 4: devices to rank - 1 (modulo 4 for ring)\n  --right-hca        with --world-size 4: devices to rank + 1 (modulo 4 for ring)\n  --mode             strict (default) or spark; same on every rank\n  --strict-mtp       native MTP in strict mode; retains profile capacity and prefix cache\n  --profile          a profile shipped in the image (TP2 default 4x512k, TP4 4x1m-tp4) or a JSON\n                     file of your own; use the same one on every rank\n  --gpu-memory-utilization  share of unified memory for the engine (default:\n                     the profile's: 0.88, or 0.72 on four Sparks); raise it on dedicated hosts for a\n                     larger KV pool and prefix cache\n  --prefix-cache-dir keep evicted prefix-cache entries in this directory on\n                     the node's own disk (ext4/xfs) instead of dropping them\n                     (default: off)\n  --prefix-cache-gb  their disk budget in GiB (default 48); the same on every rank\n  --display-carveout lend the GB10's 2 GiB display carveout to the KV cache\n                     (2 GiB more KV cache); use it on every rank (default: off)\n  --kv-shard         split latent KV ownership across the Sparks; enable it on\n                     every rank (default: off)\n  --cuda-cache       persistent CUDA JIT cache (default: ~/.cache/atlas-cuda)\nEOF\n  exit 2\n}\nrank=\"\" leader=\"\" iface=\"\" model_root=\"\" image=\"\" hca=\"\" world=2 left_hca=\"\" right_hca=\"\"\ncache=\"$HOME/.cache/atlas-cuda\" name=\"\" profile=4x512k util=\"\" pc_dir=\"\" pc_gb=\"\" carveout=\"\" siblings=0 kvshard=0\nmode=\"\"\nmode_given=0\ntopology=\"\"\nprofile_given=0\nstrict_mtp=0\ncheckpoint_name=nvidia--GLM-5.3-Flash-FP4-Local\nwhile [[ $# -gt 0 ]]; do\n  case \"$1\" in\n    --rank) rank=$2; shift 2 ;;\n    --leader-address) leader=$2; shift 2 ;;\n    --fabric-interface) iface=$2; shift 2 ;;\n    --fabric-hca) hca=$2; shift 2 ;;\n    --world-size) world=$2; shift 2 ;;\n    --topology) topology=$2; shift 2 ;;\n    --left-hca) left_hca=$2; shift 2 ;;\n    --right-hca) right_hca=$2; shift 2 ;;\n    --model-root) model_root=$2; shift 2 ;;\n    --image) image=$2; shift 2 ;;\n    --cuda-cache) cache=$2; shift 2 ;;\n    --checkpoint) checkpoint_name=$2; shift 2 ;;\n    --name) name=$2; shift 2 ;;\n    --profile) profile=$2; profile_given=1; shift 2 ;;\n    --mode) mode=$2; mode_given=1; shift 2 ;;\n    --strict-mtp) strict_mtp=1; shift ;;\n    --gpu-memory-utilization) util=$2; shift 2 ;;\n    --prefix-cache-dir) pc_dir=$2; shift 2 ;;\n    --prefix-cache-gb) pc_gb=$2; shift 2 ;;\n    --display-carveout) carveout=1; shift ;;\n    --kv-shard) kvshard=1; shift ;;\n    --no-fabric-siblings) siblings=0; shift ;;\n    *) usage ;;\n  esac\ndone\n[[ $world == 2 || $world == 4 ]] && [[ $rank =~ ^[0-9]$ ]] && (( rank < world )) &&\n  [[ -n $leader && -n $model_root && -n $image ]] || usage\nif [[ $mode_given == 0 ]]; then mode=strict; fi\n[[ $mode == strict || $mode == spark ]] || { echo \"--mode must be strict or spark\" >&2; exit 2; }\n[[ $strict_mtp == 0 || $mode == strict ]] || { echo \"--strict-mtp requires strict mode\" >&2; exit 2; }\nif [[ $world == 2 ]]; then\n  topology=${topology:-pair}\n  [[ $topology == pair ]] || { echo \"two Sparks require pair topology\" >&2; exit 2; }\nelse\n  topology=${topology:-chain}\n  [[ $topology == chain || $topology == ring ]] || { echo \"--topology must be chain or ring\" >&2; exit 2; }\n  if [[ $profile_given == 0 ]]; then profile=4x1m-tp4; fi\nfi\n\nsysfs=${FABRIC_SYSFS:-/sys/class/infiniband}\n# check_rails LIST: every device named once, up and well formed.\ncheck_rails() {\n  [[ $1 =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*(,[a-zA-Z0-9_][a-zA-Z0-9_.-]*)*$ ]] ||\n    { echo \"invalid RDMA device list $1\" >&2; exit 2; }\n  local rail seen=,\n  IFS=',' read -r -a rails <<< \"$1\"\n  for rail in \"${rails[@]}\"; do\n    [[ $seen != *,\"$rail\",* ]] || { echo \"duplicate RDMA device $rail\" >&2; exit 2; }\n    seen+=\"$rail,\"\n    grep -qs ACTIVE \"$sysfs/$rail/ports/1/state\" ||\n      { echo \"RDMA device $rail is missing or down\" >&2; exit 2; }\n  done\n}\nif (( world > 2 )); then\n  [[ -z $hca ]] || { echo \"a chain takes --left-hca and --right-hca, not --fabric-hca\" >&2; exit 2; }\n  [[ $iface =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]] || { echo \"a chain needs --fabric-interface\" >&2; exit 2; }\n  if (( rank > 0 )) || [[ $topology == ring ]]; then [[ -n $left_hca ]] || { echo \"rank $rank needs --left-hca\" >&2; exit 2; }\n  else [[ -z $left_hca ]] || { echo \"rank 0 has no left neighbour\" >&2; exit 2; }; fi\n  if (( rank < world - 1 )) || [[ $topology == ring ]]; then [[ -n $right_hca ]] || { echo \"rank $rank needs --right-hca\" >&2; exit 2; }\n  else [[ -z $right_hca ]] || { echo \"rank $rank has no right neighbour\" >&2; exit 2; }; fi\n  for list in \"$left_hca\" \"$right_hca\"; do [[ -z $list ]] || check_rails \"$list\"; done\n  if [[ -n $left_hca && -n $right_hca ]]; then\n    check_rails \"$left_hca,$right_hca\"\n  fi\nelse\n  [[ -z $left_hca && -z $right_hca ]] || { echo \"--left-hca and --right-hca need --world-size 4\" >&2; exit 2; }\n  if [[ -z $hca ]]; then\n    [[ -n $iface ]] || { echo \"pass --fabric-hca or --fabric-interface; no port is assumed\" >&2; exit 2; }\n    matches=()\n    for dev in \"$sysfs\"/*; do\n      [[ -e $dev/device/net/$iface ]] && matches+=(\"${dev##*/}\")\n    done\n    [[ ${#matches[@]} == 1 ]] || { echo \"ambiguous or missing RDMA device for $iface; pass --fabric-hca\" >&2; exit 2; }\n    hca=${matches[0]}\n  fi\n  check_rails \"$hca\"\n  if [[ -z $iface ]]; then\n    primary=${hca%%,*}\n    matches=(\"$sysfs/$primary\"/device/net/*)\n    [[ ${#matches[@]} == 1 && -e ${matches[0]} ]] ||\n      { echo \"ambiguous or missing network interface for $primary; pass --fabric-interface\" >&2; exit 2; }\n    iface=${matches[0]##*/}\n  fi\n  [[ $iface =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ && -e $sysfs/${hca%%,*}/device/net/$iface ]] ||\n    { echo \"--fabric-interface must belong to the first --fabric-hca device\" >&2; exit 2; }\nfi\n[[ $checkpoint_name =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]] ||\n  { echo \"--checkpoint must be one directory name under --model-root\" >&2; exit 2; }\nmodel_root=$(realpath \"$model_root\")\ncheckpoint=\"$model_root/$checkpoint_name\"\ndrafter=\"$model_root/incoai--GLM-5.3-Flash-DFlash2\"\nmodel=$checkpoint\nmodel_mounts=(--mount \"type=bind,src=$checkpoint,dst=$checkpoint,readonly\")\nrequired=(\"$checkpoint/config.json\" \"$drafter/config.json\")\n# NVIDIA's NVFP4 release ships its MTP layer in BF16; Atlas serves it through\n# the overlay convert.sh writes. The overlay links into the original\n# checkpoint, so both are mounted at the same absolute paths.\nif [[ $checkpoint_name == nvidia--GLM-5.3-Flash-NVFP4 ]]; then\n  model=\"$model_root/atlas-overlay\"\n  model_mounts+=(--mount \"type=bind,src=$model,dst=$model,readonly\")\n  required+=(\"$model/sparkglm-verified.json\")\nfi\nfor path in \"${required[@]}\"; do\n  [[ -f $path ]] || { echo \"missing $path\" >&2; exit 2; }\ndone\nmkdir -p \"$cache\"\nprofile_mount=()\nif [[ $profile == */* || $profile == *.json ]] && [[ ! -f $profile ]]; then\n  echo \"missing profile file $profile\" >&2; exit 2\nfi\nif [[ -f $profile ]]; then\n  profile_mount=(--mount \"type=bind,src=$(realpath \"$profile\"),dst=/opt/atlas/profiles/custom.json,readonly\")\n  profile=custom\nfi\nif [[ -n $pc_dir || -n $pc_gb ]]; then\n  pc_gb=${pc_gb:-48}\n  [[ $pc_dir == /* && $pc_dir != *,* ]] || { echo \"--prefix-cache-dir must be set to an absolute path without commas\" >&2; exit 2; }\n  [[ $pc_gb =~ ^[1-9][0-9]{1,2}$ ]] && (( pc_gb >= 16 && pc_gb <= 100 )) ||\n    { echo \"--prefix-cache-gb must be a whole number from 16 to 100\" >&2; exit 2; }\nfi\nname=${name:-atlas-sparkglm-rank$rank}\n# The engine unlinks its cache files while they are open and sweeps any a crash\n# left behind, so nothing carries over a restart.\npc_args=()\nif [[ -n $pc_dir ]]; then\n  mkdir -p \"$pc_dir/kv\" \"$pc_dir/ssm\"\n  pc_dir=$(realpath \"$pc_dir\")\n  case $(stat -f -c %T \"$pc_dir\" 2>/dev/null) in\n    tmpfs | ramfs | overlayfs) echo \"--prefix-cache-dir $pc_dir is not on a disk\" >&2; exit 2 ;;\n  esac\n  free_kb=$(df -Pk \"$pc_dir\" | awk 'NR == 2 {print $4}')\n  (( free_kb >= pc_gb * 1048576 )) ||\n    { echo \"--prefix-cache-dir $pc_dir has $((free_kb / 1048576)) GiB free; --prefix-cache-gb needs $pc_gb\" >&2; exit 2; }\n  pc_args=(--mount \"type=bind,src=$pc_dir,dst=/prefix-cache\" -e SPARKGLM_PREFIX_CACHE_GB=\"$pc_gb\")\nfi\n# One process per host may hold the carveout; every container shares this\n# host directory's lock file, which the server holds while it runs.\ncarveout_args=()\nif [[ -n $carveout ]]; then\n  lock_dir=/run/lock/sparkglm\n  mkdir -p \"$lock_dir\" && chmod 1777 \"$lock_dir\" 2>/dev/null || true\n  carveout_args=(--mount \"type=bind,src=$lock_dir,dst=$lock_dir\"\n    -e SPARKGLM_DISPLAY_CARVEOUT=1)\nfi\ndocker rm -f \"$name\" >/dev/null 2>&1 || true\ndocker run -d --name \"$name\" --restart no --network host --ipc host \\\n  --shm-size 32g --memory 114g --gpus all --device /dev/infiniband:/dev/infiniband \\\n  --cap-add IPC_LOCK --cap-add SYS_NICE --ulimit memlock=-1:-1 \\\n  --security-opt no-new-privileges=true --stop-timeout 60 \\\n  \"${model_mounts[@]}\" \\\n  --mount \"type=bind,src=$drafter,dst=$drafter,readonly\" \\\n  --mount \"type=bind,src=$cache,dst=/atlas-cuda-cache\" ${profile_mount[@]+\"${profile_mount[@]}\"} ${pc_args[@]+\"${pc_args[@]}\"} \\\n  ${carveout_args[@]+\"${carveout_args[@]}\"} \\\n  -e NODE_RANK=\"$rank\" -e MASTER_ADDR=\"$leader\" -e MASTER_PORT=29510 \\\n  -e FABRIC_INTERFACE=\"$iface\" -e FABRIC_HCA=\"$hca\" -e FABRIC_SIBLINGS=\"$siblings\" -e SPARKGLM_KV_SHARD=\"$kvshard\" \\\n  -e FABRIC_LEFT_HCA=\"$left_hca\" -e FABRIC_RIGHT_HCA=\"$right_hca\" -e SPARKGLM_TOPOLOGY=\"$topology\" \\\n  -e MODEL_PATH=\"$model\" -e DRAFTER_PATH=\"$drafter\" \\\n  -e SPARKGLM_STRICT_MTP=\"$strict_mtp\" \\\n  -e SERVED_MODEL_NAME=glm-5.3-flash-atlas -e SPARKGLM_PROFILE=\"$profile\" ${mode:+-e SPARKGLM_MODE=\"$mode\"} \\\n  ${util:+-e SPARKGLM_GPU_MEMORY_UTILIZATION=\"$util\"} \\\n  -e ATLAS_WORLD_SIZE=\"$world\" -e ATLAS_TP_SIZE=\"$world\" -e ATLAS_EP_SIZE=\"$world\" -e ATLAS_CONTEXT_WINDOW=524288 \\\n  -e NCCL_SOCKET_IFNAME=\"$iface\" -e GLOO_SOCKET_IFNAME=\"$iface\" -e NCCL_IB_HCA=\"$hca\" \\\n  -e NCCL_IB_ADDR_FAMILY=AF_INET -e NCCL_IB_ROCE_VERSION_NUM=2 -e NCCL_CROSS_NIC=0 \\\n  -e NCCL_NET=IB -e NCCL_IB_DISABLE=0 -e NCCL_IB_RETRY_CNT=7 -e NCCL_IB_TIMEOUT=22 \\\n  -e NCCL_ALGO=Ring -e NCCL_PROTO=Simple -e NCCL_BUFFSIZE=33554432 -e NCCL_CUMEM_ENABLE=0 \\\n  -e NCCL_NVLS_ENABLE=0 -e NCCL_MAX_NCHANNELS=2 -e NCCL_MIN_NCHANNELS=1 \\\n  -e NCCL_DMABUF_ENABLE=0 -e NCCL_DEBUG=WARN -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 \\\n  -e CUDA_CACHE_PATH=/atlas-cuda-cache -e CUDA_CACHE_MAXSIZE=4294967296 \\\n  \"$image\"\necho \"started $name (rank $rank); follow with: docker logs -f $name\"\n",
+        "sha256": "63d2c36b48fc1665a377b9966b8547e4205962ce1faa097d53b7047566ebba99"
+      },
+      "container_name": "shrug-rank{rank}",
+      "api_port": 8893,
+      "args": [
+        "--world-size",
+        "4",
+        "--topology",
+        "{topology}",
+        "--rank",
+        "{rank}",
+        "--leader-address",
+        "{leader_address}",
+        "--fabric-interface",
+        "{fabric_interface}",
+        {
+          "flag": "--left-hca",
+          "value": "{left_hca}",
+          "optional": true
+        },
+        {
+          "flag": "--right-hca",
+          "value": "{right_hca}",
+          "optional": true
+        },
+        "--model-root",
+        "{model_root}",
+        "--checkpoint",
+        "nvidia--GLM-5.3-Flash-FP4-Local",
+        "--image",
+        "{image}",
+        "--profile",
+        "4x1m-tp4",
+        "--mode",
+        "spark",
+        "--cuda-cache",
+        "{cuda_cache}",
+        "--name",
+        "{name}"
+      ],
+      "receipts": [
+        "https://github.com/Enntity/sparkglm/blob/68b71e058420e819d9e0c80893eb75f852dacb3c/results/2026-10-21-unified-release/RESULT.md"
+      ],
+      "notes": "The 4x1m-tp4 profile at its 0.72 utilization, Spark mode. Ring when the closing rank 3 to rank 0 cable exists, otherwise chain. No KV shard, disk prefix cache or display carveout, as qualified."
+    }
+  ]
+}

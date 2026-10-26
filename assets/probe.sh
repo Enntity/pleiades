@@ -40,9 +40,15 @@ for id in $(docker ps -q 2>/dev/null); do
   docker inspect -f '{{.Name}}|{{.Config.Image}}|{{.State.Status}}|{{.HostConfig.Runtime}}|{{with .HostConfig.DeviceRequests}}{{with index . 0}}{{.Capabilities}}{{end}}{{end}}' "$id" 2>/dev/null | sed 's|^/||'
 done
 echo '## gpu-procs'
-nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null | sed 's/, */|/g'
+nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null | sed 's/, */|/g' | while IFS='|' read -r pid rest; do
+  cid=$(grep -oE '[0-9a-f]{64}' "/proc/$pid/cgroup" 2>/dev/null | head -1)
+  cname=
+  [ -n "$cid" ] && cname=$(docker inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's|^/||')
+  echo "$pid|$rest|$cname"
+done
 echo '## clockcap'
-systemctl is-active gpu-clock-cap.service 2>/dev/null || echo inactive
+s=$(systemctl is-active gpu-clock-cap.service 2>/dev/null)
+echo "${s:-inactive}"
 echo '## disk'
 df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print "home_free_kib="$4}'
 echo '## tools'

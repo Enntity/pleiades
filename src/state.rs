@@ -23,6 +23,12 @@ pub struct Config {
     /// `owner--name@revision` of non-commercial weights the user accepted.
     #[serde(default)]
     pub accepted_noncommercial: Vec<String>,
+    /// Gateway listen address (default 127.0.0.1:8145).
+    #[serde(default)]
+    pub listen: Option<String>,
+    /// Required when the gateway listens on a non-loopback address.
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 impl Config {
@@ -55,6 +61,8 @@ impl Config {
 pub struct RankState {
     pub rank: usize,
     pub host_label: String,
+    #[serde(default)]
+    pub lan_ip: Option<String>,
     pub route: SshRoute,
     pub container: String,
 }

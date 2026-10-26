@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
@@ -34,12 +34,6 @@ fn identity_files() -> &'static [String] {
         keys.sort();
         keys
     })
-}
-
-fn add_identity_args(cmd: &mut Command) {
-    for k in identity_files() {
-        cmd.arg("-i").arg(k);
-    }
 }
 
 pub struct CmdOut {
@@ -106,6 +100,11 @@ pub trait Host: Send + Sync {
     fn run_stdin(&self, argv: &[&str], stdin_text: &str) -> Result<CmdOut>;
     /// Run `remote_cmd` under bash with the terminal attached (for sudo).
     fn run_tty(&self, remote_cmd: &str) -> Result<i32>;
+    /// Run argv, streaming stderr to ours prefixed with the host label.
+    /// Long steps (pulls, downloads, copies) use this.
+    fn run_watch(&self, argv: &[&str]) -> Result<CmdOut> {
+        self.run(argv)
+    }
 
     fn label(&self) -> String {
         self.route().target()
@@ -130,7 +129,13 @@ impl LocalHost {
     }
 }
 
-fn spawn(mut cmd: Command, stdin_text: Option<&str>) -> Result<CmdOut> {
+fn spawn(cmd: Command, stdin_text: Option<&str>) -> Result<CmdOut> {
+    spawn_watch(cmd, stdin_text, None)
+}
+
+/// Like spawn, but when `label` is set streams the child's stderr to our
+/// stderr line by line, prefixed with the label, so long steps show progress.
+fn spawn_watch(mut cmd: Command, stdin_text: Option<&str>, label: Option<&str>) -> Result<CmdOut> {
     if stdin_text.is_some() {
         cmd.stdin(Stdio::piped());
     }
@@ -145,6 +150,30 @@ fn spawn(mut cmd: Command, stdin_text: Option<&str>) -> Result<CmdOut> {
             .take()
             .expect("stdin piped")
             .write_all(text.as_bytes())?;
+    }
+    if let Some(label) = label {
+        let stderr = child.stderr.take().expect("stderr piped");
+        let label = label.to_string();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(stderr).lines() {
+                match line {
+                    Ok(l) => eprintln!("[{label}] {l}"),
+                    Err(_) => break,
+                }
+            }
+        });
+        let mut stdout = String::new();
+        std::io::Read::read_to_string(
+            &mut child.stdout.take().expect("stdout piped"),
+            &mut stdout,
+        )?;
+        let status = child.wait()?.code().unwrap_or(-1);
+        return Ok(CmdOut {
+            status,
+            stdout,
+            stderr: String::new(),
+        });
     }
     let out = child.wait_with_output()?;
     Ok(CmdOut {
@@ -183,9 +212,74 @@ impl Host for LocalHost {
             .code()
             .unwrap_or(-1))
     }
+    fn run_watch(&self, argv: &[&str]) -> Result<CmdOut> {
+        let (prog, args) = argv.split_first().context("empty argv")?;
+        let mut cmd = Command::new(prog);
+        cmd.args(args);
+        spawn_watch(cmd, None, Some(&self.label()))
+    }
 }
 
-/// A host reached by `ssh [-J jumps] user@dest`. Never writes ~/.ssh/known_hosts.
+/// The base options every ssh invocation gets, then the private keys under
+/// ~/.ssh. Used for direct hops and for each ProxyCommand hop alike.
+fn base_ssh_args(known_hosts: &Path) -> Vec<String> {
+    let mut v = vec![
+        "ssh".into(),
+        "-o".into(),
+        "BatchMode=yes".into(),
+        "-o".into(),
+        "ConnectTimeout=6".into(),
+        "-o".into(),
+        "StrictHostKeyChecking=accept-new".into(),
+        "-o".into(),
+        format!(
+            "UserKnownHostsFile={} ~/.ssh/known_hosts",
+            known_hosts.display()
+        ),
+    ];
+    for k in identity_files() {
+        v.push("-i".into());
+        v.push(k.clone());
+    }
+    v
+}
+
+/// ssh argv reaching `target` through `jumps` (each a `user@host` hop), via a
+/// nested ProxyCommand chain. OpenSSH ignores command-line options on `-J`
+/// hops, so every hop gets our full options and identity list: the innermost
+/// command opens TCP to the first jump, each outer command proxies the next.
+fn ssh_argv_chain(known_hosts: &Path, jumps: &[String], target: &str, hop: bool) -> Vec<String> {
+    let mut argv = base_ssh_args(known_hosts);
+    if let Some((last, rest)) = jumps.split_last() {
+        let inner = ssh_argv_chain(known_hosts, rest, last, true);
+        let cmdline = shlex::try_join(inner.iter().map(String::as_str)).unwrap_or_default();
+        argv.push("-o".into());
+        argv.push(format!("ProxyCommand={cmdline}"));
+    }
+    if hop {
+        argv.push("-W".into());
+        argv.push("%h:%p".into());
+    }
+    argv.push(target.into());
+    argv
+}
+
+/// argv for `ssh <opts> <route.target> <remote_cmd>` through the jump chain.
+pub fn ssh_argv(route: &SshRoute, known_hosts: &Path, remote_cmd: &str) -> Result<Vec<String>> {
+    let mut argv = ssh_argv_chain(known_hosts, &route.jumps, &route.target(), false);
+    argv.push(remote_cmd.into());
+    Ok(argv)
+}
+
+/// The same command as a shell-quoted string, for embedding in `-e` and
+/// pipelines (rsync transport, `docker save | ssh docker load`).
+pub fn ssh_shell(route: &SshRoute, known_hosts: &Path, remote_cmd: &str) -> Result<String> {
+    let argv = ssh_argv(route, known_hosts, remote_cmd)?;
+    Ok(shlex::try_join(argv.iter().map(String::as_str))?)
+}
+
+/// A host reached by ssh through the route's ProxyCommand chain. Never writes
+/// ~/.ssh/known_hosts.
 pub struct SshHost {
     route: SshRoute,
     known_hosts: PathBuf,
@@ -197,26 +291,33 @@ impl SshHost {
     }
 
     fn ssh(&self, remote_cmd: &str, stdin_text: Option<&str>, extra: &[&str]) -> Result<CmdOut> {
-        let mut cmd = Command::new("ssh");
-        cmd.args([
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=6",
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            &format!(
-                "UserKnownHostsFile={} ~/.ssh/known_hosts",
-                self.known_hosts.display()
-            ),
-        ]);
-        if !self.route.jumps.is_empty() {
-            cmd.arg("-J").arg(self.route.jumps.join(","));
+        self.ssh_watch(remote_cmd, stdin_text, extra, false)
+    }
+
+    fn ssh_watch(
+        &self,
+        remote_cmd: &str,
+        stdin_text: Option<&str>,
+        extra: &[&str],
+        watch: bool,
+    ) -> Result<CmdOut> {
+        let mut argv = ssh_argv(&self.route, &self.known_hosts, remote_cmd)?;
+        if !extra.is_empty() {
+            let cmd = argv.pop().unwrap();
+            let target = argv.pop().unwrap();
+            argv.extend(extra.iter().map(|s| s.to_string()));
+            argv.push(target);
+            argv.push(cmd);
         }
-        add_identity_args(&mut cmd);
-        cmd.args(extra).arg(self.route.target()).arg(remote_cmd);
-        spawn(cmd, stdin_text)
+        let (prog, args) = argv.split_first().context("empty argv")?;
+        let mut cmd = Command::new(prog);
+        cmd.args(args);
+        spawn_watch(cmd, stdin_text, watch.then(|| self.label()).as_deref())
+    }
+
+    /// Shell-quoted ssh command for this route, for pipelines the host runs.
+    pub fn shell(&self, remote_cmd: &str) -> Result<String> {
+        ssh_shell(&self.route, &self.known_hosts, remote_cmd)
     }
 }
 
@@ -238,15 +339,14 @@ impl Host for SshHost {
             &[],
         )
     }
+    fn run_watch(&self, argv: &[&str]) -> Result<CmdOut> {
+        self.ssh_watch(&shlex::try_join(argv.iter().copied())?, None, &[], true)
+    }
     fn run_tty(&self, remote_cmd: &str) -> Result<i32> {
-        let mut cmd = Command::new("ssh");
-        cmd.arg("-t");
-        if !self.route.jumps.is_empty() {
-            cmd.arg("-J").arg(self.route.jumps.join(","));
-        }
-        add_identity_args(&mut cmd);
-        cmd.arg(self.route.target()).arg(remote_cmd);
-        Ok(cmd.status()?.code().unwrap_or(-1))
+        let mut argv = ssh_argv(&self.route, &self.known_hosts, remote_cmd)?;
+        argv.insert(1, "-t".into());
+        let (prog, args) = argv.split_first().context("empty argv")?;
+        Ok(Command::new(prog).args(args).status()?.code().unwrap_or(-1))
     }
 }
 

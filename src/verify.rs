@@ -5,15 +5,31 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::time::Duration;
 
-/// Check 1: non-stream chat math. content trimmed == "391", finish "stop".
+/// Check 1: non-stream chat math. The content's digit runs must be exactly
+/// ["391"] (a thinking model may wrap the answer in words) and the finish
+/// reason "stop".
 pub fn check_math_reply(body: &Value) -> Result<()> {
     let choice = &body["choices"][0];
     let content = choice["message"]["content"].as_str().unwrap_or("");
     let finish = choice["finish_reason"].as_str().unwrap_or("");
-    if content.trim() == "391" && finish == "stop" {
+    let digits: Vec<&str> = content
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if digits == ["391"] && finish == "stop" {
         Ok(())
     } else {
-        bail!("math check failed: content={content:?} finish_reason={finish:?}")
+        let reasoning = choice["message"]["reasoning_content"]
+            .as_str()
+            .map(|r| !r.is_empty())
+            .unwrap_or(false);
+        if content.trim().is_empty() && reasoning {
+            bail!("math check failed: only reasoning came back, no content")
+        } else {
+            bail!(
+                "math check failed: content={content:?} digits={digits:?} finish_reason={finish:?}"
+            )
+        }
     }
 }
 
@@ -106,18 +122,22 @@ fn http() -> Result<reqwest::blocking::Client> {
         .build()?)
 }
 
-/// Run all four checks against the engine at http://127.0.0.1:{port}.
-pub fn verify_engine(port: u16, model_id: &str) -> Result<()> {
+/// Run all four checks against `base` (the gateway), model_id as the engine's
+/// served name; api_key is sent as a bearer when set.
+pub fn verify_engine(base: &str, model_id: &str, api_key: Option<&str>) -> Result<()> {
     let client = http()?;
-    let base = format!("http://127.0.0.1:{port}");
+    let base = base.trim_end_matches('/');
+    let auth = |rb: reqwest::blocking::RequestBuilder| match api_key {
+        Some(k) => rb.bearer_auth(k),
+        None => rb,
+    };
 
-    let body = client
-        .post(format!("{base}/v1/chat/completions"))
+    let body = auth(client.post(format!("{base}/v1/chat/completions")))
         .json(&json!({
-            "model": model_id,
+            "model": "default",
             "messages": [{"role": "user", "content": "What is 17*23? Answer with the number."}],
             "temperature": 0,
-            "max_tokens": 1024,
+            "max_tokens": 2048,
             "reasoning_effort": "low",
             "stream": false,
         }))
@@ -128,13 +148,13 @@ pub fn verify_engine(port: u16, model_id: &str) -> Result<()> {
         .context("math chat reply")?;
     check_math_reply(&body)?;
 
-    let sse = client
-        .post(format!("{base}/v1/chat/completions"))
+    let sse = auth(client.post(format!("{base}/v1/chat/completions")))
         .json(&json!({
             "model": model_id,
             "messages": [{"role": "user", "content": "Say hello in one sentence."}],
             "temperature": 0,
-            "max_tokens": 128,
+            "max_tokens": 2048,
+            "reasoning_effort": "low",
             "stream": true,
         }))
         .send()
@@ -144,8 +164,7 @@ pub fn verify_engine(port: u16, model_id: &str) -> Result<()> {
         .context("stream chat body")?;
     check_stream_content(&sse)?;
 
-    let sse = client
-        .post(format!("{base}/v1/chat/completions"))
+    let sse = auth(client.post(format!("{base}/v1/chat/completions")))
         .json(&json!({
             "model": model_id,
             "messages": [{"role": "user", "content": "What's the weather in Paris? Use the tool."}],
@@ -162,7 +181,8 @@ pub fn verify_engine(port: u16, model_id: &str) -> Result<()> {
                 }
             }],
             "temperature": 0,
-            "max_tokens": 256,
+            "max_tokens": 2048,
+            "reasoning_effort": "low",
             "stream": true,
         }))
         .send()
@@ -172,11 +192,11 @@ pub fn verify_engine(port: u16, model_id: &str) -> Result<()> {
         .context("tool-call body")?;
     check_stream_tool_call(&sse)?;
 
-    let body = client
-        .post(format!("{base}/v1/messages"))
+    let body = auth(client.post(format!("{base}/v1/messages")))
         .json(&json!({
-            "model": model_id,
-            "max_tokens": 64,
+            "model": "claude-sonnet-4-5",
+            "max_tokens": 2048,
+            "reasoning_effort": "low",
             "messages": [{"role": "user", "content": "Say hi."}],
         }))
         .send()

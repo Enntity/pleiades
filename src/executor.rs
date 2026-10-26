@@ -4,7 +4,7 @@
 use crate::catalog::Release;
 use crate::discover::Discovery;
 use crate::gateway;
-use crate::host::Host;
+use crate::host::{Host, ssh_shell};
 use crate::plan::Plan;
 use crate::state::{RankState, State};
 use crate::verify;
@@ -46,25 +46,24 @@ impl Up<'_> {
                     {
                         return Ok(());
                     }
-                    let pull = host.run(&["docker", "pull", image])?;
+                    let pull = host.run_watch(&["docker", "pull", image])?;
                     if !pull.ok() {
                         if rp.rank == 0 {
                             bail!("docker pull failed on rank 0: {}", pull.stderr.trim());
                         }
                         // Fall back to shipping the image over ssh from rank 0.
-                        let route = host.route();
-                        let ssh = format!(
-                            "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o 'UserKnownHostsFile={} ~/.ssh/known_hosts'{} {}",
-                            self.known_hosts,
-                            if route.jumps.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" -J {}", route.jumps.join(","))
-                            },
-                            route.target()
+                        let ssh = ssh_shell(
+                            host.route(),
+                            std::path::Path::new(&self.known_hosts),
+                            "docker load",
+                        )?;
+                        let script = format!(
+                            "docker save {} | {}",
+                            shlex::try_quote(image.as_str())?,
+                            ssh
                         );
-                        let script = format!("docker save {} | {} docker load", shlex::try_quote(image.as_str())?, ssh);
-                        let load = self.hosts[0].run_script(&script, &[])?;
+                        say(&format!("image: copying to {} over ssh", rp.host));
+                        let load = self.hosts[0].run_watch(&["bash", "-c", &script])?;
                         if !load.ok() {
                             bail!("docker load failed on {}: {}", rp.host, load.stderr.trim());
                         }
@@ -120,7 +119,7 @@ impl Up<'_> {
         dir: &str,
     ) -> Result<()> {
         let out = if has_hf {
-            host.run(&[
+            host.run_watch(&[
                 "hf",
                 "download",
                 repo,
@@ -130,7 +129,7 @@ impl Up<'_> {
                 dir,
             ])?
         } else {
-            host.run(&[
+            host.run_watch(&[
                 "docker", "run", "--rm",
                 "--user", uid,
                 "-e", "HOME=/tmp",
@@ -150,11 +149,12 @@ impl Up<'_> {
         Ok(())
     }
 
-    /// Step 3: weights on every rank, marker last.
+    /// Step 3: weights on every rank, marker last. Rank 0 and the ranks not
+    /// cabled to it download in parallel; copies to the cabled ranks start
+    /// once rank 0's copy is complete, in parallel with each other.
     pub fn ensure_weights(&self) -> Result<()> {
         let ranks = &self.plan.ranks;
-        // Which ranks are directly cabled to rank 0? From the plan's fabrics:
-        // rank 1 always; rank 3 on a ring (it is rank 0's left neighbor).
+        // Ranks directly cabled to rank 0: rank 1 always; rank 3 on a ring.
         let mut cabled: Vec<usize> = vec![];
         if ranks.len() > 1 {
             cabled.push(1);
@@ -163,64 +163,73 @@ impl Up<'_> {
             cabled.push(3);
         }
         for w in &self.release.weights {
-            let dir_name = w.dir_name();
-            // Download on rank 0 and on every rank not cabled to it.
-            let r0 = &ranks[0];
-            let dir0 = format!("{}/{}", r0.model_root, dir_name);
-            let h0 = self.hosts[r0.host_idx];
-            if !self.marker(h0, &dir0, &w.revision) {
-                say(&format!("weights: {} on {}", w.repo, r0.host));
-                let has_hf = self.discovery.hosts[r0.host_idx].probe.has_tool("hf");
-                let uid = h0.run(&["id", "-u"])?.stdout.trim().to_string()
-                    + ":"
-                    + h0.run(&["id", "-g"])?.stdout.trim();
-                let _ = h0.run(&["mkdir", "-p", &dir0]);
-                Self::hf_download(
-                    h0,
-                    has_hf,
-                    &uid,
-                    &r0.model_root,
-                    &w.repo,
-                    &w.revision,
-                    &dir0,
-                )?;
-            }
-            for rp in &ranks[1..] {
-                let dir = format!("{}/{}", rp.model_root, dir_name);
-                let host = self.hosts[rp.host_idx];
-                if self.marker(host, &dir, &w.revision) {
-                    continue;
+            let dir_name = std::sync::Arc::new(w.dir_name());
+            thread::scope(|s| {
+                // Downloaders: rank 0 plus every rank not cabled to it.
+                let mut jobs = Vec::new();
+                for rp in ranks.iter() {
+                    if rp.rank != 0 && cabled.contains(&rp.rank) {
+                        continue;
+                    }
+                    let dir = format!("{}/{}", rp.model_root, &dir_name);
+                    jobs.push(s.spawn(move || {
+                        let host = self.hosts[rp.host_idx];
+                        if self.marker(host, &dir, &w.revision) {
+                            return Ok(());
+                        }
+                        say(&format!("weights: {} on {}", w.repo, rp.host));
+                        let has_hf = self.discovery.hosts[rp.host_idx].probe.has_tool("hf");
+                        let uid = host.run(&["id", "-u"])?.stdout.trim().to_string()
+                            + ":"
+                            + host.run(&["id", "-g"])?.stdout.trim();
+                        let _ = host.run(&["mkdir", "-p", &dir]);
+                        Self::hf_download(
+                            host,
+                            has_hf,
+                            &uid,
+                            &rp.model_root,
+                            &w.repo,
+                            &w.revision,
+                            &dir,
+                        )?;
+                        self.write_marker(host, &dir, &w.revision)
+                    }));
                 }
-                if cabled.contains(&rp.rank) {
-                    let target = self.fabric_target(rp)?;
-                    say(&format!(
-                        "weights: copy {} to {} over the cable",
-                        dir_name, rp.host
-                    ));
-                    self.copy_over_cable(&r0.model_root, &dir_name, &rp.model_root, &target)?;
-                } else {
-                    say(&format!("weights: {} on {}", w.repo, rp.host));
-                    let has_hf = self.discovery.hosts[rp.host_idx].probe.has_tool("hf");
-                    let uid = host.run(&["id", "-u"])?.stdout.trim().to_string()
-                        + ":"
-                        + host.run(&["id", "-g"])?.stdout.trim();
-                    let _ = host.run(&["mkdir", "-p", &dir]);
-                    Self::hf_download(
-                        host,
-                        has_hf,
-                        &uid,
-                        &rp.model_root,
-                        &w.repo,
-                        &w.revision,
-                        &dir,
-                    )?;
+                for j in jobs {
+                    j.join()
+                        .map_err(|_| anyhow::anyhow!("download thread panicked"))??;
                 }
-                self.write_marker(host, &dir, &w.revision)?;
-            }
-            // Rank 0's marker last, after its own copy is verified complete.
-            if !self.marker(h0, &dir0, &w.revision) {
-                self.write_marker(h0, &dir0, &w.revision)?;
-            }
+                // Cable copies now that rank 0's tree is complete.
+                let mut copies = Vec::new();
+                for &ri in &cabled {
+                    let rp = &ranks[ri];
+                    let dir = format!("{}/{}", rp.model_root, &dir_name);
+                    let dir_name = dir_name.clone();
+                    copies.push(s.spawn(move || {
+                        let host = self.hosts[rp.host_idx];
+                        if self.marker(host, &dir, &w.revision) {
+                            return Ok(());
+                        }
+                        let target = self.fabric_target(rp)?;
+                        say(&format!(
+                            "weights: copy {} to {} over the cable",
+                            dir_name, rp.host
+                        ));
+                        self.copy_over_cable(
+                            &ranks[0].model_root,
+                            &dir_name,
+                            &rp.model_root,
+                            &target,
+                        )?;
+                        self.write_marker(host, &dir, &w.revision)
+                    }));
+                }
+                for j in copies {
+                    j.join()
+                        .map_err(|_| anyhow::anyhow!("copy thread panicked"))??;
+                }
+                Ok::<(), anyhow::Error>(())
+            })?;
         }
         say("weights: ok on every rank");
         Ok(())
@@ -385,10 +394,8 @@ rsync -a --exclude '*.incomplete' -e '{ssh}' "$src/$dir" "$target:$dst/"
         }
     }
 
-    /// Steps 6-7: verify the API, write state, start the gateway.
+    /// Steps 6-7: write state, start the gateway, verify through it.
     pub fn finish(&self) -> Result<()> {
-        verify::verify_engine(self.release.api_port, &self.release.model_id)?;
-        say("verify: math, stream, tool call and /v1/messages all pass");
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         let state = State {
             schema: "shrug.state/v1".into(),
@@ -404,6 +411,7 @@ rsync -a --exclude '*.incomplete' -e '{ssh}' "$src/$dir" "$target:$dst/"
                 .map(|rp| RankState {
                     rank: rp.rank,
                     host_label: rp.host.clone(),
+                    lan_ip: rp.lan_ip.clone(),
                     route: rp.ssh.clone(),
                     container: rp.container.clone(),
                 })
@@ -412,6 +420,16 @@ rsync -a --exclude '*.incomplete' -e '{ssh}' "$src/$dir" "$target:$dst/"
         };
         state.save()?;
         gateway::start(&state)?;
+        let cfg = crate::state::Config::load();
+        let gw_port = gateway::listen_addr(&cfg)
+            .map(|a| a.port())
+            .unwrap_or(gateway::DEFAULT_PORT);
+        verify::verify_engine(
+            &format!("http://127.0.0.1:{gw_port}"),
+            &self.release.model_id,
+            cfg.api_key.as_deref(),
+        )?;
+        say("verify: math, stream, tool call and /v1/messages all pass through the gateway");
         Ok(())
     }
 

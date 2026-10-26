@@ -147,6 +147,52 @@ pub fn status(g: &Globals) -> Result<i32> {
         })
         .unwrap_or_default();
     doc["kv_metrics"] = metrics.clone().into();
+    // Gateway: listen address, health, recent-request summary.
+    let cfg = crate::state::Config::load();
+    let listen = crate::gateway::listen_addr(&cfg)
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| crate::gateway::DEFAULT_LISTEN.into());
+    doc["gateway"] = serde_json::json!({"listen": listen});
+    let gbase = format!(
+        "http://127.0.0.1:{}",
+        listen.rsplit(':').next().unwrap_or("8145")
+    );
+    let ghealth = client
+        .get(format!("{gbase}/health"))
+        .send()
+        .and_then(|r| r.json::<serde_json::Value>())
+        .unwrap_or_default();
+    doc["gateway"]["health"] = ghealth;
+    let gstats = client
+        .get(format!("{gbase}/shrug/stats"))
+        .send()
+        .and_then(|r| r.json::<serde_json::Value>())
+        .unwrap_or_default();
+    let events: Vec<&serde_json::Value> = gstats["events"]
+        .as_array()
+        .map(|a| a.iter().collect())
+        .unwrap_or_default();
+    let mut fb: Vec<f64> = events
+        .iter()
+        .filter_map(|e| e["first_byte_ms"].as_f64())
+        .collect();
+    let mut tps: Vec<f64> = events
+        .iter()
+        .filter_map(|e| {
+            let out = e["output_tokens"].as_f64()?;
+            let span = e["total_ms"].as_f64()? - e["first_byte_ms"].as_f64()?;
+            (span > 0.0).then(|| out / (span / 1000.0))
+        })
+        .collect();
+    let median = |v: &mut Vec<f64>| {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v.get(v.len() / 2).copied().unwrap_or(0.0)
+    };
+    doc["gateway"]["requests"] = serde_json::json!({
+        "count": gstats["counters"]["total"],
+        "median_first_byte_ms": median(&mut fb),
+        "median_output_tok_s": (median(&mut tps) * 10.0).round() / 10.0,
+    });
     if g.json {
         println!("{}", serde_json::to_string_pretty(&doc)?);
     } else {
@@ -168,6 +214,14 @@ pub fn status(g: &Globals) -> Result<i32> {
         for m in &metrics {
             println!("  {m}");
         }
+        println!(
+            "gateway {} health={} requests={} ttft={}ms tok/s={}",
+            doc["gateway"]["listen"].as_str().unwrap_or("-"),
+            doc["gateway"]["health"]["upstream"],
+            doc["gateway"]["requests"]["count"],
+            doc["gateway"]["requests"]["median_first_byte_ms"],
+            doc["gateway"]["requests"]["median_output_tok_s"],
+        );
     }
     Ok(0)
 }

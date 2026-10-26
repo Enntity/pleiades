@@ -56,6 +56,9 @@ pub struct GpuProc {
     pub pid: u32,
     pub name: String,
     pub used_memory: String,
+    /// Container name when the pid runs inside a docker container.
+    #[serde(default)]
+    pub container: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -249,6 +252,10 @@ pub fn parse(text: &str) -> Result<Probe> {
                             .get(2)
                             .map(|s| s.trim().to_string())
                             .unwrap_or_default(),
+                        container: cols
+                            .get(3)
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty()),
                     });
                 }
             }

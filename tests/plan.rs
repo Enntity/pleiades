@@ -177,6 +177,14 @@ fn blockers_from_probe_and_chain_middle() {
         pid: 42,
         name: "python".into(),
         used_memory: "1000 MiB".into(),
+        container: None,
+    });
+    // A proc inside one of Shrug's containers is not a blocker.
+    d.hosts[1].probe.gpu_procs.push(shrug::probe::GpuProc {
+        pid: 43,
+        name: "spark".into(),
+        used_memory: "90000 MiB".into(),
+        container: Some("shrug-rank1".into()),
     });
     let cfg = Config::default();
     let p = build(&d, &opts(&cfg, None), &FakeChecks::default());

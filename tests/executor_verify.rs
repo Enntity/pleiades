@@ -13,7 +13,11 @@ use shrug::verify;
 fn verify_math_reply() {
     let ok = json!({"choices":[{"message":{"content":" 391 "},"finish_reason":"stop"}]});
     assert!(verify::check_math_reply(&ok).is_ok());
-    let bad = json!({"choices":[{"message":{"content":"391."},"finish_reason":"stop"}]});
+    // Digit runs must be exactly ["391"]: "391." is fine, "1391" is not.
+    let ok2 =
+        json!({"choices":[{"message":{"content":"The answer is 391."},"finish_reason":"stop"}]});
+    assert!(verify::check_math_reply(&ok2).is_ok());
+    let bad = json!({"choices":[{"message":{"content":"1391"},"finish_reason":"stop"}]});
     assert!(verify::check_math_reply(&bad).is_err());
     let bad = json!({"choices":[{"message":{"content":"391"},"finish_reason":"length"}]});
     assert!(verify::check_math_reply(&bad).is_err());

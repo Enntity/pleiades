@@ -121,64 +121,9 @@ pub fn build(
     checks: &dyn Checks,
 ) -> Plan {
     let mut warnings = Vec::new();
-    let mut blockers: Vec<String> = d
-        .failures
-        .iter()
-        .map(|f| {
-            let mut s = format!("ssh to {} failed: {}", f.candidate, f.detail);
-            if let Some(r) = &f.remedy {
-                s.push_str(&format!("; run `{r}`"));
-            }
-            s
-        })
-        .collect();
+    let mut blockers: Vec<String> = Vec::new();
 
-    // Per-host blockers.
-    for (i, h) in d.hosts.iter().enumerate() {
-        let p = &h.probe;
-        let who = if p.hostname.is_empty() {
-            format!("host {i}")
-        } else {
-            p.hostname.clone()
-        };
-        if !p.is_gb10() {
-            blockers.push(format!("{who}: no GB10 GPU found"));
-        }
-        if !p.docker_ok {
-            blockers.push(format!("{who}: docker is not usable by {}", p.user));
-        } else if !p.has_nvidia_runtime() {
-            blockers.push(format!(
-                "{who}: nvidia container toolkit missing (no nvidia-ctk, no nvidia runtime)"
-            ));
-        }
-        if p.clock_cap != "active" {
-            let msg = format!(
-                "{who}: gpu-clock-cap.service is {}; run `shrug clock-cap --go`",
-                p.clock_cap
-            );
-            if opts.no_clock_cap {
-                warnings.push(msg);
-            } else {
-                blockers.push(msg);
-            }
-        }
-        for c in &p.containers {
-            if !c.name.starts_with("shrug-") && c.holds_gpu && c.status == "running" {
-                blockers.push(format!(
-                    "{who}: container {} ({}) holds the GPU; Shrug did not start it",
-                    c.name, c.image
-                ));
-            }
-        }
-        for proc in &p.gpu_procs {
-            blockers.push(format!(
-                "{who}: GPU process {} (pid {}) is not Shrug's",
-                proc.name, proc.pid
-            ));
-        }
-    }
-
-    // Cluster.
+    // Cluster first: its shape decides which hosts the release uses.
     let cluster = match topo::cluster(d) {
         Ok(c) => c,
         Err(e) => {
@@ -204,6 +149,87 @@ pub fn build(
         }
         r
     });
+
+    // The hosts the chosen release actually runs on; problems elsewhere are
+    // warnings, not blockers.
+    let used: std::collections::BTreeSet<usize> = match release {
+        Some(r) if (r.sparks as usize) <= usable => {
+            cluster.ranks[..r.sparks as usize].iter().copied().collect()
+        }
+        _ => (0..d.hosts.len()).collect(),
+    };
+
+    // ssh/discovery failures: blockers only without an explicit --model —
+    // the default release depends on how many hosts were found.
+    for f in &d.failures {
+        let mut s = format!("ssh to {} failed: {}", f.candidate, f.detail);
+        if let Some(r) = &f.remedy {
+            s.push_str(&format!("; run `{r}`"));
+        }
+        if opts.model.is_none() {
+            blockers.push(s);
+        } else {
+            warnings.push(s);
+        }
+    }
+
+    // Per-host checks.
+    for (i, h) in d.hosts.iter().enumerate() {
+        let p = &h.probe;
+        let who = if p.hostname.is_empty() {
+            format!("host {i}")
+        } else {
+            p.hostname.clone()
+        };
+        let used_host = used.contains(&i);
+        let mut issues: Vec<String> = Vec::new();
+        let unused = if used_host { "" } else { " (unused host)" };
+        if !p.is_gb10() {
+            issues.push(format!("{who}: no GB10 GPU found{unused}"));
+        }
+        if !p.docker_ok {
+            issues.push(format!(
+                "{who}: docker is not usable by {}{}",
+                p.user, unused
+            ));
+        } else if !p.has_nvidia_runtime() {
+            issues.push(format!(
+                "{who}: nvidia container toolkit missing (no nvidia-ctk, no nvidia runtime){unused}"
+            ));
+        }
+        if p.clock_cap != "active" {
+            issues.push(format!(
+                "{who}: gpu-clock-cap.service is {}; run `shrug clock-cap --go`{unused}",
+                p.clock_cap
+            ));
+        }
+        for c in &p.containers {
+            if !c.name.starts_with("shrug-") && c.holds_gpu && c.status == "running" {
+                issues.push(format!(
+                    "{who}: container {} ({}) holds the GPU; Shrug did not start it{unused}",
+                    c.name, c.image
+                ));
+            }
+        }
+        for proc in &p.gpu_procs {
+            if proc
+                .container
+                .as_deref()
+                .is_some_and(|c| c.starts_with("shrug-"))
+            {
+                continue;
+            }
+            issues.push(format!(
+                "{who}: GPU process {} (pid {}) is not Shrug's{unused}",
+                proc.name, proc.pid
+            ));
+        }
+        if used_host && !opts.no_clock_cap {
+            blockers.extend(issues);
+        } else {
+            warnings.extend(issues);
+        }
+    }
 
     let mut ranks: Vec<RankPlan> = Vec::new();
     let mut steps = Vec::new();

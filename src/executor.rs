@@ -17,6 +17,32 @@ pub const PYTHON_IMAGE: &str =
     "python:3.12.12-slim@sha256:f3fa41d74a768c2fce8016b98c191ae8c1bacd8f1152870a3f9f87d350920b7c";
 pub const HF_HUB_VERSION: &str = "2.2.0";
 
+/// LLooM model dirs use `hf download --local-dir`: every `*.metadata` file
+/// under `.cache/huggingface/download` records the fetched commit on its
+/// first line, so all of them must equal the pinned revision.
+const LLOOM_QUALIFY: &str = r#"metas=$(find "$cand/.cache/huggingface/download" -name '*.metadata' 2>/dev/null)
+[ -n "$metas" ] || exit 0
+ok=1
+while IFS= read -r m; do
+    [ "$(head -n1 "$m" 2>/dev/null)" = "$rev" ] || { ok=0; break; }
+done <<EOF
+$metas
+EOF
+[ "$ok" = 1 ] || exit 0"#;
+
+/// Same qualification as LLOOM_QUALIFY, but prints the candidate path
+/// instead of seeding — the read-only check run on a peer.
+const PEER_LLOOM_CHECK: &str = r#"metas=$(find "$cand/.cache/huggingface/download" -name '*.metadata' 2>/dev/null)
+if [ -n "$metas" ]; then
+    ok=1
+    while IFS= read -r m; do
+        [ "$(head -n1 "$m" 2>/dev/null)" = "$rev" ] || { ok=0; break; }
+    done <<EOF
+$metas
+EOF
+    [ "$ok" = 1 ] && { echo "$cand"; exit 0; }
+fi"#;
+
 pub struct Up<'a> {
     pub plan: &'a Plan,
     pub discovery: &'a Discovery,
@@ -172,6 +198,7 @@ impl Up<'_> {
                         continue;
                     }
                     let dir = format!("{}/{}", rp.model_root, dir_name);
+                    let dir_name = dir_name.clone();
                     jobs.push(s.spawn(move || {
                         let host = self.hosts[rp.host_idx];
                         if self.marker(host, &dir, &w.revision) {
@@ -182,6 +209,19 @@ impl Up<'_> {
                         let uid = host.run(&["id", "-u"])?.stdout.trim().to_string()
                             + ":"
                             + host.run(&["id", "-g"])?.stdout.trim();
+                        let probe = &self.discovery.hosts[rp.host_idx].probe;
+                        if let Some(tag) =
+                            Self::seed_local(probe, host, &dir, &dir_name, &w.revision)?
+                        {
+                            say(&format!(
+                                "weights: reusing {} on {} from {}",
+                                dir_name,
+                                rp.host,
+                                Self::seed_label(tag)
+                            ));
+                        } else if rp.rank == 0 {
+                            self.seed_from_peer(host, &dir_name, &w.revision, &dir)?;
+                        }
                         let _ = host.run(&["mkdir", "-p", &dir]);
                         Self::hf_download(
                             host,
@@ -209,6 +249,17 @@ impl Up<'_> {
                         let host = self.hosts[rp.host_idx];
                         if self.marker(host, &dir, &w.revision) {
                             return Ok(());
+                        }
+                        let probe = &self.discovery.hosts[rp.host_idx].probe;
+                        if let Some(tag) =
+                            Self::seed_local(probe, host, &dir, &dir_name, &w.revision)?
+                        {
+                            say(&format!(
+                                "weights: reusing {} on {} from {}",
+                                dir_name,
+                                rp.host,
+                                Self::seed_label(tag)
+                            ));
                         }
                         let target = self.fabric_target(rp)?;
                         say(&format!(
@@ -254,11 +305,153 @@ impl Up<'_> {
         Ok(())
     }
 
-    /// Peer's fabric IP on its edge with rank 0 (lowest-subnet rail).
-    fn fabric_target(&self, rp: &crate::plan::RankPlan) -> Result<String> {
-        // Find the peer probe's fabric addr sharing a subnet with rank 0.
-        let h0 = &self.discovery.hosts[0].probe;
-        let hp = &self.discovery.hosts[rp.host_idx].probe;
+    /// Seed `dir` from a copy of the pinned revision already on this host:
+    /// LLooM's model dir first (qualified by HF download metadata), then the
+    /// HF cache snapshot. Each candidate's check and copy run in one script
+    /// that prints its tag on success; returns the tag, or None.
+    fn seed_local(
+        probe: &crate::probe::Probe,
+        host: &dyn Host,
+        dir: &str,
+        dir_name: &str,
+        rev: &str,
+    ) -> Result<Option<&'static str>> {
+        let home = &probe.home;
+        for (cand, cp, qualify, tag) in [
+            (
+                format!("{home}/.lloom/models/{dir_name}"),
+                "cp -alf",
+                LLOOM_QUALIFY,
+                "lloom",
+            ),
+            (
+                format!("{home}/.cache/huggingface/hub/models--{dir_name}/snapshots/{rev}"),
+                "cp -rlLf",
+                "[ -d \"$cand\" ] || exit 0",
+                "hfcache",
+            ),
+        ] {
+            let script = format!(
+                r#"dst={dst} cand={cand} rev={rev}
+{qualify}
+existed=0
+[ -d "$dst" ] && existed=1
+if mkdir -p "$dst" && {cp} "$cand/." "$dst/" 2>/dev/null; then
+    rm -f "$dst/.lloom-acquisition.json"
+    echo {tag}
+elif [ "$existed" = 0 ]; then
+    rm -rf "$dst"
+fi
+"#,
+                cand = shlex::try_quote(cand.as_str())?,
+                dst = shlex::try_quote(dir)?,
+                rev = shlex::try_quote(rev)?,
+            );
+            let out = host.run_script(&script, &[])?;
+            if out.ok() && out.stdout.trim() == tag {
+                return Ok(Some(tag));
+            }
+        }
+        Ok(None)
+    }
+
+    fn seed_label(tag: &str) -> &'static str {
+        match tag {
+            "lloom" => "~/.lloom/models",
+            _ => "the Hugging Face cache",
+        }
+    }
+
+    /// Rank 0 pulls the pinned revision from a discovered host that already
+    /// has it — in a plan or not — preferring a fabric-connected peer over a
+    /// LAN one. Read-only on the peer; the first reachable source wins.
+    fn seed_from_peer(&self, host: &dyn Host, dir_name: &str, rev: &str, dst: &str) -> Result<()> {
+        let rank0 = self.plan.ranks[0].host_idx;
+        let mut peers: Vec<(usize, String)> = Vec::new();
+        for (idx, f) in self.discovery.hosts.iter().enumerate() {
+            if idx == rank0 {
+                continue;
+            }
+            let home = &f.probe.home;
+            let script = format!(
+                r#"cand={lloom} rev={rev}
+{lloom_check}
+cand={hfcache}
+[ -d "$cand" ] && echo "$cand"
+"#,
+                lloom = shlex::try_quote(format!("{home}/.lloom/models/{dir_name}").as_str())?,
+                rev = shlex::try_quote(rev)?,
+                lloom_check = PEER_LLOOM_CHECK,
+                hfcache = shlex::try_quote(
+                    format!("{home}/.cache/huggingface/hub/models--{dir_name}/snapshots/{rev}")
+                        .as_str()
+                )?,
+            );
+            if let Ok(out) = self.hosts[idx].run_script(&script, &[]) {
+                let src = out.stdout.trim();
+                if out.ok() && !src.is_empty() {
+                    peers.push((idx, src.to_string()));
+                }
+            }
+        }
+        // Cabled peers first: the copy rides the cable, not the LAN.
+        peers.sort_by_key(|(idx, _)| usize::from(self.fabric_addr(*idx).is_none()));
+        for (idx, src) in peers {
+            let fabric = self.fabric_addr(idx);
+            let addr = fabric.map(|ip| ip.to_string()).or_else(|| {
+                self.discovery.hosts[idx]
+                    .probe
+                    .lan_ip
+                    .map(|ip| ip.to_string())
+            });
+            let Some(addr) = addr else { continue };
+            say(&format!(
+                "weights: copying {} to {} from {} over the {}",
+                dir_name,
+                self.plan.ranks[0].host,
+                self.discovery.hosts[idx].probe.hostname,
+                if fabric.is_some() { "cable" } else { "LAN" },
+            ));
+            let target = format!("{}@{addr}", self.discovery.hosts[idx].route.user);
+            let ssh = format!(
+                "ssh -c aes128-gcm@openssh.com -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o 'UserKnownHostsFile={} ~/.ssh/known_hosts'",
+                self.known_hosts
+            );
+            let srcq = shlex::try_quote(src.as_str())?;
+            let script = format!(
+                r#"set -euo pipefail
+remote={remote} src={src} dst={dst}
+mkdir -p "$dst"
+ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o 'UserKnownHostsFile={kh} ~/.ssh/known_hosts' "$remote" "cd {src} && find -L . -type f -size +64M ! -name '*.incomplete' -printf '%P\0'" |
+  xargs -0 -P8 -I{{}} rsync -aRL -e '{ssh}' "$remote:$src/./{{}}" "$dst/"
+rsync -aL --exclude '*.incomplete' -e '{ssh}' "$remote:$src/" "$dst/"
+rm -f "$dst/.lloom-acquisition.json"
+"#,
+                remote = shlex::try_quote(&target)?,
+                src = srcq,
+                dst = shlex::try_quote(dst)?,
+                kh = self.known_hosts,
+                ssh = ssh,
+            );
+            let out = host.run_script(&script, &[])?;
+            if !out.ok() {
+                // hf download still verifies and fills whatever arrived.
+                say(&format!(
+                    "weights: copy from {} failed, downloading instead: {}",
+                    self.discovery.hosts[idx].probe.hostname,
+                    out.stderr.trim()
+                ));
+            }
+            return Ok(());
+        }
+        Ok(())
+    }
+
+    /// Discovered host `idx`'s fabric IP on a subnet it shares with rank 0's
+    /// host (lowest-subnet rail), when they are cabled together.
+    fn fabric_addr(&self, idx: usize) -> Option<std::net::Ipv4Addr> {
+        let h0 = &self.discovery.hosts[self.plan.ranks[0].host_idx].probe;
+        let hp = &self.discovery.hosts[idx].probe;
         let mut best: Option<(std::net::Ipv4Addr, std::net::Ipv4Addr)> = None;
         for pa in h0.fabric.iter().filter(|p| p.active) {
             for na in &pa.addrs {
@@ -274,7 +467,13 @@ impl Up<'_> {
                 }
             }
         }
-        best.map(|(_, ip)| ip.to_string())
+        best.map(|(_, ip)| ip)
+    }
+
+    /// Peer's fabric IP on its edge with rank 0 (lowest-subnet rail).
+    fn fabric_target(&self, rp: &crate::plan::RankPlan) -> Result<String> {
+        self.fabric_addr(rp.host_idx)
+            .map(|ip| ip.to_string())
             .context("no cabled fabric address toward rank 0")
     }
 

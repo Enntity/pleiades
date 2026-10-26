@@ -124,7 +124,10 @@ changes only the plan.
    inside it.
 2. Download weights with `hf`, or a pinned `python:3.12-slim` container with
    a pinned `huggingface_hub`, on rank 0 and on every rank not cabled to it,
-   in parallel. Copy to cabled ranks over the cable with eight rsync streams.
+   in parallel. A copy of the pinned revision already on the cluster — a
+   LLooM model directory or a Hugging Face cache snapshot — is reused by
+   hardlink, or pulled from a peer over the cable, before downloading.
+   Copy to cabled ranks over the cable with eight rsync streams.
    A `.shrug-revision` marker is written last on each host.
 3. Remove Shrug's previous containers, start ranks from the highest to rank 0,
    and wait up to 20 minutes for `/health`, watching every container.

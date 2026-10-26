@@ -38,7 +38,9 @@ setting.
   with it.
 - **Disk.** Free space on each Spark: about 190 GB for GLM, 140 GB for
   Qwen3.8-Flash-Next, 25 GB for Qwen3.8-27B. Weights go under
-  `~/.shrug/models`.
+  `~/.shrug/models`; Shrug reuses a copy of the pinned revision already on
+  the cluster (LLooM's model directory or the Hugging Face cache) by
+  hardlink or over the cable instead of downloading.
 - **More than one Spark:** direct ConnectX-7 cables with an IPv4 address on
   each end, and passwordless ssh from the Spark you run Shrug on to the
   others. When ssh is missing, `shrug` prints the exact `ssh-copy-id` to run.
